@@ -8,10 +8,13 @@ use yii\helpers\Html;
 $this->title = $model->id;
 $this->params['breadcrumbs'][] = ['label' => Yii::t('app', 'Status'), 'url' => ['index']];
 $this->params['breadcrumbs'][] = $this->title;
-
 ?>
 <div class="solution-view">
-    <h3>Run id: <?= Html::encode($this->title) ?></h3>
+    <div class="row">
+        <div class="col-md-6">
+            <p><?= Yii::t('app', 'Submit Time') ?>：<?= $model->created_at ?></p>
+        </div>
+    </div>
     <div class="pre"><p><?= Html::encode($model->source) ?></p></div>
 </div>
 <script type="text/javascript">

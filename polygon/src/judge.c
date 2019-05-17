@@ -19,11 +19,11 @@
  * You should have received a copy of the GNU General Public License
  * along with HUSTOJ. if not, see <http://www.gnu.org/licenses/>.
  */
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
-#include <unistd.h>
 #include <time.h>
 #include <stdarg.h>
 #include <ctype.h>
@@ -77,7 +77,6 @@ struct problem_struct {
 
 static char oj_home[BUFFER_SIZE];
 
-static int max_running;
 static int sleep_time;
 static int java_time_bonus = 5;
 static int java_memory_bonus = 512;
@@ -184,7 +183,6 @@ void init_mysql_conf()
     FILE *fp = NULL;
     char buf[BUFFER_SIZE];
     db.port_number = 3306;
-    max_running = 3;
     sleep_time = 3;
     strcpy(java_xms, "-Xms32m");
     strcpy(java_xmx, "-Xmx256m");
@@ -781,7 +779,7 @@ int special_judge(char* oj_home, int problem_id, char *infile, char *outfile,
         setrlimit(RLIMIT_FSIZE, &LIM);
 
         ret = execute_cmd("%sdata/%d/spj '%s' '%s' %s", oj_home, problem_id,
-                infile, outfile, userfile);
+                infile, userfile, outfile);
         if (ret)
             exit(1);
         else

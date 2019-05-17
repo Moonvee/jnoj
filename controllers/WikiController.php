@@ -13,11 +13,6 @@ class WikiController extends Controller
         return $this->render('index');
     }
 
-    public function actionInfo()
-    {
-        return $this->render('info');
-    }
-
     public function actionAbout()
     {
         return $this->render('about');
@@ -28,13 +23,18 @@ class WikiController extends Controller
         return $this->render('contest');
     }
 
-    public function actionDesign()
-    {
-        return $this->render('design');
-    }
-
     public function actionProblem()
     {
         return $this->render('problem');
+    }
+
+    public function actionSpj()
+    {
+        return $this->render('spj');
+    }
+
+    public function actionOi()
+    {
+        return $this->render('oi');
     }
 }

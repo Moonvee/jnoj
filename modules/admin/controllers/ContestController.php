@@ -67,7 +67,7 @@ class ContestController extends Controller
     public function actionIndex()
     {
         $dataProvider = new ActiveDataProvider([
-            'query' => Contest::find()->orderBy(['id' => SORT_DESC]),
+            'query' => Contest::find()->where(['group_id' => 0])->orderBy(['id' => SORT_DESC]),
         ]);
 
         return $this->render('index', [
@@ -82,13 +82,13 @@ class ContestController extends Controller
         if (($post = Yii::$app->request->post())) {
             $pid = intval($post['problem_id']);
             $new_pid = intval($post['new_problem_id']);
-            $has_problem1 = (new Query())->select('problem_id')
+            $has_problem1 = (new Query())->select('id')
                 ->from('{{%problem}}')
-                ->where('problem_id=:id', [':id' => $pid])
+                ->where('id=:id', [':id' => $pid])
                 ->exists();
-            $has_problem2 = (new Query())->select('problem_id')
+            $has_problem2 = (new Query())->select('id')
                 ->from('{{%problem}}')
-                ->where('problem_id=:id', [':id' => $pid])
+                ->where('id=:id', [':id' => $pid])
                 ->exists();
             if ($has_problem1 && $has_problem2) {
                 $problem_in_contest = (new Query())->select('problem_id')
@@ -102,8 +102,8 @@ class ContestController extends Controller
 
                 Yii::$app->db->createCommand()->update('{{%contest_problem}}', [
                     'problem_id' => $new_pid,
-                ], ['problem_id' => $pid, 'contest_id' => $model->contest_id])->execute();
-                Yii::$app->session->setFlash('success', Yii::t('app', 'Submit successfully'));
+                ], ['problem_id' => $pid, 'contest_id' => $model->id])->execute();
+                Yii::$app->session->setFlash('success', Yii::t('app', 'Submitted successfully'));
             } else {
                 Yii::$app->session->setFlash('error', Yii::t('app', 'No such problem.'));
             }
@@ -186,35 +186,43 @@ class ContestController extends Controller
         }
         if (Yii::$app->request->isPost) {
             if (Yii::$app->request->get('uid')) {
+                // 删除已参赛用户
                 $uid = Yii::$app->request->get('uid');
-                $in_contest = Yii::$app->db->createCommand('SELECT count(1) FROM {{%contest_user}} WHERE user_id=:uid AND contest_id=:cid', [
+                $inContest = Yii::$app->db->createCommand('SELECT count(1) FROM {{%contest_user}} WHERE user_id=:uid AND contest_id=:cid', [
                     ':uid' => $uid,
                     ':cid' => $model->id
                 ])->queryScalar();
-                if ($in_contest) {
-                    ContestUser::findOne(['user_id' => $uid, 'contest_id' => $model->id])->delete();
+                if ($inContest) {
+                    ContestUser::deleteAll(['user_id' => $uid, 'contest_id' => $model->id]);
+                    Solution::deleteAll(['created_by' => $uid, 'contest_id' => $model->id]);
                     Yii::$app->session->setFlash('success', Yii::t('app', 'Deleted successfully'));
                 }
             } else {
-                $post = Yii::$app->request->post();
-                $user = User::findByUsername($post['user']);
-                if ($user === null) {
-                    Yii::$app->session->setFlash('error', Yii::t('app', 'Failed. No such user.'));
-                } else {
-                    $in_contest = Yii::$app->db->createCommand('SELECT count(1) FROM {{%contest_user}} WHERE user_id=:uid AND contest_id=:cid', [
-                        ':uid' => $user->id,
-                        ':cid' => $model->id
-                    ])->queryScalar();
-                    if ($in_contest) {
-                        Yii::$app->session->setFlash('success', Yii::t('app', 'This user has registered for the contest.'));
-                    } else {
+                //　添加参赛用户
+                $users = Yii::$app->request->post('user');
+                $users = explode("\n", trim($users));
+                $message = "";
+                foreach ($users as $username) {
+                    //　查找用户ID 以及查看是否已经加入比赛中
+                    $username = trim($username);
+                    $query = (new Query())->select('u.id as user_id, count(c.user_id) as exist')
+                        ->from('{{%user}} as u')
+                        ->leftJoin('{{%contest_user}} as c', 'c.user_id=u.id')
+                        ->where('u.username=:name and c.contest_id=:cid', [':name' => $username, ':cid' => $model->id])
+                        ->one();
+                    if (!isset($query['user_id'])) {
+                        $message .= $username . " 不存在该用户<br>";
+                    } else if (!$query['exist']) {
                         Yii::$app->db->createCommand()->insert('{{%contest_user}}', [
-                            'user_id' => $user->id,
+                            'user_id' => $query['user_id'],
                             'contest_id' => $model->id,
                         ])->execute();
-                        Yii::$app->session->setFlash('success', Yii::t('app', 'Add successfully'));
+                        $message .= $username . " 添加成功<br>";
+                    } else {
+                        $message .= $username . " 已参加比赛<br>";
                     }
                 }
+                Yii::$app->session->setFlash('info', $message);
             }
             return $this->refresh();
         }
@@ -232,6 +240,59 @@ class ContestController extends Controller
         ]);
     }
 
+    /**
+     * 设置题目比赛来源
+     * @param $id
+     * @return \yii\web\Response
+     * @throws NotFoundHttpException
+     * @throws \yii\db\Exception
+     */
+    public function actionSetProblemSource($id)
+    {
+        $model = $this->findModel($id);
+        if (($post = Yii::$app->request->post())) {
+            $source = $post['source'];
+            $problemIds = Yii::$app->db->createCommand('SELECT problem_id as id FROM contest_problem WHERE contest_id=' . $model->id)->queryColumn();
+            foreach ($problemIds as $pid) {
+                Yii::$app->db->createCommand()->update('{{%problem}}', ['source' => $source], [
+                    'id' => $pid
+                ])->execute();
+            }
+            Yii::$app->session->setFlash('success', Yii::t('app', 'Submitted successfully'));
+        }
+        return $this->redirect(['contest/view', 'id' => $model->id]);
+    }
+
+    /**
+     * 设置比赛题目的状态
+     * @param $id
+     * @return \yii\web\Response
+     * @throws NotFoundHttpException
+     * @throws \yii\db\Exception
+     */
+    public function actionSetProblemStatus($id)
+    {
+        $model = $this->findModel($id);
+        if (($post = Yii::$app->request->post())) {
+            $status = $post['status'];
+            $problemIds = Yii::$app->db->createCommand('SELECT problem_id as id FROM contest_problem WHERE contest_id=' . $model->id)->queryColumn();
+            foreach ($problemIds as $pid) {
+                Yii::$app->db->createCommand()->update('{{%problem}}', ['status' => $status], [
+                    'id' => $pid
+                ])->execute();
+            }
+            Yii::$app->session->setFlash('success', Yii::t('app', 'Submitted successfully'));
+        }
+        return $this->redirect(['contest/view', 'id' => $model->id]);
+    }
+
+    /**
+     * 给比赛添加一个问题
+     * @param $id
+     * @return \yii\web\Response
+     * @throws NotFoundHttpException
+     * @throws \yii\db\Exception
+     */
     public function actionAddproblem($id)
     {
         $model = $this->findModel($id);
@@ -261,12 +322,12 @@ class ContestController extends Controller
                     'contest_id' => $model->id,
                     'num' => $count
                 ])->execute();
-                Yii::$app->session->setFlash('success', Yii::t('app', 'Submit successfully'));
+                Yii::$app->session->setFlash('success', Yii::t('app', 'Submitted successfully'));
             } else {
                 Yii::$app->session->setFlash('error', Yii::t('app', 'No such problem.'));
             }
-            return $this->redirect(['contest/view', 'id' => $id]);
         }
+        return $this->redirect(['contest/view', 'id' => $id]);
     }
 
     /**
@@ -275,20 +336,27 @@ class ContestController extends Controller
      * @param bool $json
      * @return string
      */
-    public function actionBoard($id, $json = false)
+    public function actionScrollScoreboard($id, $json = false)
     {
         $model = $this->findModel($id);
 
         $this->layout = 'basic';
 
+        $numberOfGoldMedals = Yii::$app->request->get('gold');
+        $numberOfSilverMedals = Yii::$app->request->get('silver');
+        $numberOfBronzeMedals = Yii::$app->request->get('bronze');
+
         if ($json) {
-            $data = (new Query())->select('s.id, u.username, u.nickname, s.result, s.created_at, p.num')
+            $query = (new Query())->select('s.id, u.username, u.nickname, s.result, s.created_at, p.num')
                 ->from('{{%solution}} as s')
                 ->leftJoin('{{%user}} as u', 'u.id=s.created_by')
                 ->leftJoin('{{%contest_problem}} as p', 'p.problem_id=s.problem_id')
                 ->where(['s.contest_id' => $model->id])
-                ->all();
-
+                ->distinct();
+            if ($model->scenario == Contest::SCENARIO_OFFLINE) {
+                $query->andWhere(['u.role' => User::ROLE_PLAYER]);
+            }
+            $data = $query->all();
             foreach ($data as &$v) {
                 $v['submitId'] = $v['id'];
                 $v['subTime'] = $v['created_at'];
@@ -304,7 +372,10 @@ class ContestController extends Controller
         }
 
         return $this->render('board', [
-            'model' => $model
+            'model' => $model,
+            'numberOfGoldMedals' => $numberOfGoldMedals,
+            'numberOfSilverMedals' => $numberOfSilverMedals,
+            'numberOfBronzeMedals' => $numberOfBronzeMedals
         ]);
     }
 
@@ -319,9 +390,15 @@ class ContestController extends Controller
 
         $this->layout = 'basic';
 
-        return $this->render('rank', [
-            'model' => $model,
-        ]);
+        if ($model->type == Contest::TYPE_OI) {
+            return $this->render('oi_rank', [
+                'model' => $model,
+            ]);
+        } else {
+            return $this->render('rank', [
+                'model' => $model,
+            ]);
+        }
     }
 
     public function actionPrint($id)
@@ -395,7 +472,7 @@ class ContestController extends Controller
             } catch (\Exception $e) {
                 echo 'Caught exception: ',  $e->getMessage(), "\n";
             }
-            Yii::$app->session->setFlash('success', Yii::t('app', 'Save successfully'));
+            Yii::$app->session->setFlash('success', Yii::t('app', 'Submitted successfully'));
             return $this->refresh();
         }
 
@@ -472,14 +549,14 @@ class ContestController extends Controller
                 // 给前台用户提醒
                 $client = stream_socket_client('tcp://0.0.0.0:2121', $errno, $errmsg, 1);
                 fwrite($client, json_encode([
-                    'uid' => $discuss->user_id,
+                    'uid' => $discuss->created_by,
                     'content' => Yii::t('app', 'New reply') . ': '. $new_clarify->content
                 ])."\n");
             } catch (\Exception $e) {
                 echo 'Caught exception: ',  $e->getMessage(), "\n";
             }
 
-            Yii::$app->session->setFlash('success', 'Submit Successfully');
+            Yii::$app->session->setFlash('success', Yii::t('app', 'Submitted successfully'));
             return $this->refresh();
         }
 
@@ -513,9 +590,9 @@ class ContestController extends Controller
             ->delete('{{%contest_problem}}', ['contest_id' => $id, 'problem_id' => $pid])
             ->execute();
         if ($ok) {
-            Yii::$app->session->setFlash('success', Yii::t('app', 'Delete successfully'));
+            Yii::$app->session->setFlash('success', Yii::t('app', 'Deleted successfully'));
         } else {
-            Yii::$app->session->setFlash('success', Yii::t('app', 'Delete failed'));
+            Yii::$app->session->setFlash('success', Yii::t('app', 'Deleted failed'));
         }
         return $this->redirect(['contest/view', 'id' => $id]);
     }
@@ -531,7 +608,7 @@ class ContestController extends Controller
         $this->findModel($id)->delete();
         Solution::deleteAll(['contest_id' => $id]);
         ContestUser::deleteAll(['contest_id' => $id]);
-        Discuss::deleteAll(['contest_id' => $id]);
+        Discuss::deleteAll(['entity' => Discuss::ENTITY_CONTEST, 'entity_id' => $id]);
         ContestProblem::deleteAll(['contest_id' => $id]);
         ContestPrint::deleteAll(['contest_id' => $id]);
         ContestAnnouncement::deleteAll(['contest_id' => $id]);

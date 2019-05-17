@@ -16,6 +16,9 @@ $this->params['breadcrumbs'][] = $this->title;
             ['label' => Yii::t('app', 'Preview'), 'url' => ['/admin/problem/view', 'id' => $model->id]],
             ['label' => Yii::t('app', 'Edit'), 'url' => ['/admin/problem/update', 'id' => $model->id]],
             ['label' => Yii::t('app', 'Tests Data'), 'url' => ['/admin/problem/test-data', 'id' => $model->id]],
+            ['label' => Yii::t('app', 'Verify Data'), 'url' => ['/admin/problem/verify', 'id' => $model->id]],
+            ['label' => Yii::t('app', 'SPJ'), 'url' => ['/admin/problem/spj', 'id' => $model->id]],
+            ['label' => Yii::t('app', 'Subtask'), 'url' => ['/admin/problem/subtask', 'id' => $model->id]]
         ],
     ]) ?>
 </div>
@@ -51,7 +54,7 @@ $this->params['breadcrumbs'][] = $this->title;
                     <pre><?= $model->sample_output ?></pre>
                 </div>
 
-                <?php if (!empty($model->sample_input_2)):?>
+                <?php if ($model->sample_input_2 != '' || $model->sample_output_2 != ''):?>
                     <div class="input">
                         <h4><?= Yii::t('app', 'Input') ?></h4>
                         <pre><?= $model->sample_input_2 ?></pre>
@@ -62,7 +65,7 @@ $this->params['breadcrumbs'][] = $this->title;
                     </div>
                 <?php endif; ?>
 
-                <?php if (!empty($model->sample_input_3)):?>
+                <?php if ($model->sample_input_3 != '' || $model->sample_output_3 != ''):?>
                     <div class="input">
                         <h4><?= Yii::t('app', 'Input') ?></h4>
                         <pre><?= $model->sample_input_3 ?></pre>
@@ -81,6 +84,13 @@ $this->params['breadcrumbs'][] = $this->title;
                 <?= Yii::$app->formatter->asHtml($model->hint) ?>
             </div>
         <?php endif; ?>
+
+        <?php if (!empty($model->source)): ?>
+            <h3><?= Yii::t('app', 'Source') ?></h3>
+            <div class="content-wrapper">
+                <?= Yii::$app->formatter->asHtml($model->source) ?>
+            </div>
+        <?php endif; ?>
     </div>
     <div class="col-md-3 problem-info">
         <div class="panel panel-default">
@@ -89,11 +99,11 @@ $this->params['breadcrumbs'][] = $this->title;
             <table class="table">
                 <tbody>
                 <tr>
-                    <td>Time limit</td>
+                    <td><?= Yii::t('app', 'Time Limit') ?></td>
                     <td><?= $model->time_limit ?> Second</td>
                 </tr>
                 <tr>
-                    <td>Memory limit</td>
+                    <td><?= Yii::t('app', 'Memory Limit') ?></td>
                     <td><?= $model->memory_limit ?> MB</td>
                 </tr>
                 </tbody>

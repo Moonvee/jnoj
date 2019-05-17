@@ -22,7 +22,7 @@ $this->title = Yii::t('app', 'Problems');
             'options' => ['class' => 'table-responsive problem-index-list'],
             'columns' => [
                 [
-                    'attribute' => 'problem_id',
+                    'attribute' => 'id',
                     'value' => function ($model, $key, $index, $column) use ($solvedProblem) {
                         $solve = '';
                         if (isset($solvedProblem[$model->id])) {
@@ -31,7 +31,7 @@ $this->title = Yii::t('app', 'Problems');
                         return $solve . Html::a($model->id, ['/problem/view', 'id' => $key]);
                     },
                     'format' => 'raw',
-                    'options' => ['width' => '100px']
+                    'options' => ['width' => '110px']
                 ],
                 [
                     'attribute' => 'title',
@@ -73,7 +73,7 @@ $this->title = Yii::t('app', 'Problems');
                 <?= Html::beginForm('', 'post', ['class' => 'form-inline']) ?>
                 <div class="input-group">
                     <?= Html::label(Yii::t('app', 'Search'), 'q', ['class' => 'sr-only']) ?>
-                    <?= Html::textInput('q', '', ['class' => 'form-control', 'placeholder' => 'Problem ID or Title']) ?>
+                    <?= Html::textInput('q', '', ['class' => 'form-control', 'placeholder' => '输入 ID 或标题或来源']) ?>
                     <span class="input-group-btn">
                     <?= Html::submitButton('<span class="glyphicon glyphicon-search"></span>', ['class' => 'btn btn-default']) ?>
                     </span>

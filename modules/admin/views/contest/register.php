@@ -20,13 +20,17 @@ $this->params['breadcrumbs'][] = ['label' => $this->title, 'url' => ['view', 'id
 <h1><?= Html::encode($model->title) ?></h1>
 
 <?php Modal::begin([
-    'header' => '<h2>Add a user to the contest</h2>',
-    'toggleButton' => ['label' => 'Add User', 'class' => 'btn btn-success'],
+    'header' => '<h2>' . Yii::t('app', 'Add participating user') . '</h2>',
+    'toggleButton' => ['label' => Yii::t('app', 'Add participating user'), 'class' => 'btn btn-success'],
 ]);?>
 <?= Html::beginForm(['contest/register', 'id' => $model->id]) ?>
+    <?php if ($model->scenario == Contest::SCENARIO_OFFLINE): ?>
+        <p class="text-muted">当前比赛为线下赛，在此添加的账号在榜单排名上会被打星，不参与榜单排名</p>
+    <?php endif; ?>
     <div class="form-group">
-        <?= Html::label(Yii::t('app', 'User ID'), 'user') ?>
-        <?= Html::textInput('user', '',['class' => 'form-control', 'placeholder' => 'User Id or Username or Email']) ?>
+        <?= Html::label(Yii::t('app', 'User'), 'user') ?>
+        <?= Html::textarea('user', '',['class' => 'form-control', 'rows' => 10]) ?>
+        <p class="hint-block">请把要参赛用户的用户名复制到此处，一个名字占据一行，请自行删除多余的空行。</p>
     </div>
 
     <div class="form-group">
@@ -53,13 +57,12 @@ $this->params['breadcrumbs'][] = ['label' => $this->title, 'url' => ['view', 'id
         <?= $form->field($generatorForm, 'names')->textarea(['rows' => 10])->hint('请把所有队伍名称复制到此处，一个名字占据一行，请自行删除多余的空行')  ?>
 
         <div class="form-group">
-            <p>生成账户过程需等待一段时间，在此期间请勿刷新页面</p>
             <?= Html::submitButton(Yii::t('app', 'Generate'), ['class' => 'btn btn-success']) ?>
         </div>
 
         <?php ActiveForm::end(); ?>
     <?php Modal::end(); ?>
-    <?= Html::a('Print User and Password', ['contest/printuser', 'id' => $model->id], ['class' => 'btn btn-default', 'target' => '_blank']) ?>
+    <?= Html::a(Yii::t('app', 'Copy these accounts to distribute'), ['contest/printuser', 'id' => $model->id], ['class' => 'btn btn-default', 'target' => '_blank']) ?>
 <?php endif; ?>
 
 <?= GridView::widget([
@@ -100,7 +103,7 @@ $this->params['breadcrumbs'][] = ['label' => $this->title, 'url' => ['view', 'id
                     $options = [
                         'title' => Yii::t('yii', 'Delete'),
                         'aria-label' => Yii::t('yii', 'Delete'),
-                        'data-confirm' => Yii::t('yii', 'Are you sure you want to delete this item?'),
+                        'data-confirm' => '删除该项，也会删除该用户在此比赛中的提交记录，确定删除？',
                         'data-method' => 'post',
                         'data-pjax' => '0',
                     ];

@@ -29,10 +29,7 @@ $problems = $model->problems;
         <?= Html::a(Yii::t('app', 'Submit records'), ['status', 'id' => $model->id], ['class' => 'btn btn-default', 'target' => '_blank']) ?>
     </p>
     <p>
-        <?php if ($model->scenario == Contest::SCENARIO_OFFLINE): ?>
-        <?= Html::a(Yii::t('app', 'Scroll Board'), ['board', 'id' => $model->id], ['class' => 'btn btn-success', 'target' => '_blank']) ?>
-        <?php endif; ?>
-        <?= Html::a(Yii::t('app', 'Rated'), ['rated', 'id' => $model->id], ['class' => 'btn btn-default']) ?>
+        <?= Html::a(Yii::t('app', 'Calculate rating'), ['rated', 'id' => $model->id], ['class' => 'btn btn-default']) ?>
         <?= Html::a(Yii::t('app', 'Contest User'), ['register', 'id' => $model->id], ['class' => 'btn btn-primary']) ?>
         <?= Html::a(Yii::t('app', 'Editorial'), ['editorial', 'id' => $model->id], ['class' => 'btn btn-primary']) ?>
         <?= Html::a(Yii::t('app', 'Delete'), ['delete', 'id' => $model->id], [
@@ -47,7 +44,39 @@ $problems = $model->problems;
         <?= Html::a(Yii::t('app', 'Print Problem'), ['print', 'id' => $model->id], ['class' => 'btn btn-info', 'target' => '_blank']) ?>
         <?= Html::a(Yii::t('app', 'Print Rank'), ['rank', 'id' => $model->id], ['class' => 'btn btn-success', 'target' => '_blank']) ?>
     </p>
-    <p class="help-block">打印使用方法：打开链接后，在页面上鼠标“右键”-“打印”，可以导出为 PDF 格式后打印</p>
+    <?php if ($model->scenario == Contest::SCENARIO_OFFLINE): ?>
+        <?php Modal::begin([
+            'header' => '<h3>'.Yii::t('app','Scroll Scoreboard').'</h3>',
+            'toggleButton' => ['label' => Yii::t('app', 'Scroll Scoreboard'), 'class' => 'btn btn-success'],
+        ]); ?>
+        <?= Html::beginForm(['contest/scroll-scoreboard', 'id' => $model->id], 'get', ['target' => '_blank']) ?>
+        <div class="form-group">
+            <?= Html::label(Yii::t('app', 'Number of gold medals'), 'gold') ?>
+            <?= Html::textInput('gold', round($model->getContestUserCount() * 0.1), ['class' => 'form-control']) ?>
+        </div>
+        <div class="form-group">
+            <?= Html::label(Yii::t('app', 'Number of silver medals'), 'silver') ?>
+            <?= Html::textInput('silver', round($model->getContestUserCount() * 0.2), ['class' => 'form-control']) ?>
+        </div>
+        <div class="form-group">
+            <?= Html::label(Yii::t('app', 'Number of bronze medals'), 'bronze') ?>
+            <?= Html::textInput('bronze', round($model->getContestUserCount() * 0.3), ['class' => 'form-control']) ?>
+        </div>
+        <div class="form-group">
+            <?= Html::submitButton(Yii::t('app', '打开滚榜页面'), ['class' => 'btn btn-primary']) ?>
+        </div>
+        <p class="hint-block">
+            1. 填写上述奖牌数，在滚榜页面会对获奖队伍有颜色的区分。暂无冠亚季军颜色区分，若有此需求，请将其包含在金牌数中。
+        </p>
+        <p class="hint-block">
+            2. 打开滚榜页面后，通过不断按回车或空格键来进行滚动。
+        </p>
+        <p class="hint-block">
+            3. 建议把浏览器设为全屏显示（打开页面后，按<code>F11</code>键）体验更佳。
+        </p>
+        <?= Html::endForm(); ?>
+        <?php Modal::end(); ?>
+    <?php endif; ?>
     <hr>
     <h3>
         <?= Yii::t('app', 'Information') ?>
@@ -61,7 +90,7 @@ $problems = $model->problems;
             'start_time',
             'end_time',
             'lock_board_time',
-            'description:ntext',
+            'description:html',
             [
                 'label' => Yii::t('app', 'Scenario'),
                 'value' => $model->scenario == Contest::SCENARIO_ONLINE ? Yii::t('app', 'Online') : Yii::t('app', 'Offline')
@@ -97,27 +126,78 @@ $problems = $model->problems;
     ]) ?>
 
     <hr>
-    <h3><?= Yii::t('app', 'Problems') ?></h3>
+    <h3>
+        <?= Yii::t('app', 'Problems') ?>
+    </h3>
+    <?php Modal::begin([
+        'header' => '<h3>'.Yii::t('app','设置题目来源').'</h3>',
+        'toggleButton' => ['label' => '设置下列所有题目的来源', 'class' => 'btn btn-success'],
+    ]); ?>
+    <?= Html::beginForm(['contest/set-problem-source', 'id' => $model->id]) ?>
+    <div class="form-group">
+        <?= Html::label(Yii::t('app', 'Source'), 'problem_id') ?>
+        <?= Html::textInput('source', $model->title,['class' => 'form-control']) ?>
+        <p class="hint-block">
+            设置题目来源有利于在首页题库中根据题目来源来搜索题目。此操作会修改题目的“来源”信息。
+        </p>
+    </div>
+    <div class="form-group">
+        <?= Html::submitButton(Yii::t('app', 'Submit'), ['class' => 'btn btn-primary']) ?>
+    </div>
+    <?= Html::endForm(); ?>
+    <?php Modal::end(); ?>
+
+    <?php Modal::begin([
+        'header' => '<h3>'.Yii::t('app','设置下列所有题目在前台显示状态').'</h3>',
+        'toggleButton' => ['label' => '设置题目在前台显示状态', 'class' => 'btn btn-success'],
+    ]); ?>
+    <?= Html::beginForm(['contest/set-problem-status', 'id' => $model->id]) ?>
+    <div class="form-group">
+        <?= Html::label(Yii::t('app', 'Status'), 'status') ?>
+        <label class="radio-inline">
+            <input type="radio" name="status" value="<?= \app\models\Problem::STATUS_VISIBLE ?>">
+            <?= Yii::t('app', 'Visible') ?>
+        </label>
+        <label class="radio-inline">
+            <input type="radio" name="status" value="<?= \app\models\Problem::STATUS_HIDDEN ?>">
+            <?= Yii::t('app', 'Hidden') ?>
+        </label>
+        <div>
+            该操作用于该场比赛目前添加的所有题目在前台设为隐藏或可见。
+            <ul>
+                <li>题目目前的状态可以在 <?= Html::a(Yii::t('app', 'Problem'), ['problem/index'], ['target' => '_blank']) ?> 中查看</li>
+                <li>状态为隐藏时，前台不可见。反之则可见</li>
+                <li>题目刚创建或从 Polygon 同步到题库时，题目的状态默认为隐藏</li>
+                <li>若前台存在题目的提交记录，并不会将那些提交记录设为隐藏</li>
+            </ul>
+        </div>
+    </div>
+    <div class="form-group">
+        <?= Html::submitButton(Yii::t('app', 'Submit'), ['class' => 'btn btn-primary']) ?>
+    </div>
+    <?= Html::endForm(); ?>
+    <?php Modal::end(); ?>
+
     <div class="table-responsive">
         <table class="table table-bordered">
             <thead>
             <tr>
                 <th width="70px">#</th>
                 <th width="120px">Problem ID</th>
-                <th>Name</th>
-                <th width="200px">Operation</th>
+                <th><?= Yii::t('app', 'Problem Name') ?></th>
+                <th width="200px"><?= Yii::t('app', 'Operation') ?></th>
             </tr>
             </thead>
             <tbody>
             <?php foreach ($problems as $key => $p): ?>
                 <tr>
-                    <th><?= Html::a(chr(65 + $key), ['view', 'id' => $model->id, 'action' => 'problem', 'problem_id' => $key]) ?></th>
-                    <th><?= Html::a($p['problem_id'], '') ?></th>
-                    <td><?= Html::a(Html::encode($p['title']), ['view', 'id' => $model->id, 'action' => 'problem', 'problem_id' => $key]) ?></td>
+                    <th><?= Html::a(chr(65 + $key), ['/admin/problem/view', 'id' => $p['problem_id']]) ?></th>
+                    <th><?= Html::a($p['problem_id'], ['/admin/problem/view', 'id' => $p['problem_id']]) ?></th>
+                    <td><?= Html::a(Html::encode($p['title']), ['/admin/problem/view', 'id' => $p['problem_id']]) ?></td>
                     <th>
                         <?php Modal::begin([
-                            'header' => '<h3>'.Yii::t('app','Update'). ' : ' . chr(65 + $key) . '</h3>',
-                            'toggleButton' => ['label' => 'Update', 'class' => 'btn btn-success'],
+                            'header' => '<h3>'. Yii::t('app','Modify') . ' : ' . chr(65 + $key) . '</h3>',
+                            'toggleButton' => ['label' => Yii::t('app','Modify'), 'class' => 'btn btn-success'],
                         ]); ?>
 
                         <?= Html::beginForm(['contest/updateproblem', 'id' => $model->id]) ?>
@@ -159,8 +239,8 @@ $problems = $model->problems;
                 <th></th>
                 <th>
                     <?php Modal::begin([
-                        'header' => '<h3>'.Yii::t('app','Add a problem').'</h3>',
-                        'toggleButton' => ['label' => 'Add a problem', 'class' => 'btn btn-success'],
+                        'header' => '<h3>' . Yii::t('app','Add a problem') . '</h3>',
+                        'toggleButton' => ['label' => Yii::t('app','Add a problem'), 'class' => 'btn btn-success'],
                     ]); ?>
 
                     <?= Html::beginForm(['contest/addproblem', 'id' => $model->id]) ?>

@@ -46,14 +46,15 @@ class ProblemController extends Controller
     {
         $query = Problem::find();
 
-        if (Yii::$app->request->isGet && !empty($tag = Yii::$app->request->get('tag'))) {
-            $query->andWhere('tags LIKE :tag', [':tag' => '%' . $tag . '%']);
+        if (Yii::$app->request->get('tag') != '') {
+            $query->andWhere('tags LIKE :tag', [':tag' => '%' . Yii::$app->request->get('tag') . '%']);
         }
         if (($post = Yii::$app->request->post())) {
             $query->orWhere(['like', 'title', $post['q']])
-                ->orWhere(['like', 'id', $post['q']]);
+                ->orWhere(['like', 'id', $post['q']])
+                ->orWhere(['like', 'source', $post['q']]);
         }
-        $query->andWhere(['status' => Problem::STATUS_VISIBLE]);
+        $query->andWhere('status<>' . Problem::STATUS_HIDDEN);
         $dataProvider = new ActiveDataProvider([
             'query' => $query,
             'pagination' => [
@@ -61,12 +62,17 @@ class ProblemController extends Controller
             ]
         ]);
 
-        $tags = (new TaggingQuery())->select('tags')
-            ->from('{{%problem}}')
-            ->where(['status' => Problem::STATUS_VISIBLE])
-            ->limit(20)
-            ->displaySort(['freq' => SORT_DESC])
-            ->getTags();
+        $cache = Yii::$app->cache;
+        $tags = $cache->get('problem-tags');
+        if ($tags === false) {
+            $tags = (new TaggingQuery())->select('tags')
+                ->from('{{%problem}}')
+                ->where('status<>' . Problem::STATUS_HIDDEN)
+                ->limit(30)
+                ->displaySort(['freq' => SORT_DESC])
+                ->getTags();
+            $cache->set('problem-tags', $tags, 3600);
+        }
 
         $solvedProblem = [];
         if (!Yii::$app->user->isGuest) {
@@ -131,7 +137,7 @@ class ProblemController extends Controller
             $newDiscuss->entity = Discuss::ENTITY_PROBLEM;
             $newDiscuss->entity_id = $id;
             $newDiscuss->save();
-            Yii::$app->session->setFlash('success', 'Submit Successfully');
+            Yii::$app->session->setFlash('success', Yii::t('app', 'Submitted successfully'));
             return $this->refresh();
         }
 
@@ -172,8 +178,8 @@ class ProblemController extends Controller
             $solution->problem_id = $model->id;
             $solution->status = Solution::STATUS_VISIBLE;
             $solution->save();
-            Yii::$app->session->setFlash('success', 'Submit Successfully');
-            return $this->redirect(['/solution/index']);
+            Yii::$app->session->setFlash('success', Yii::t('app', 'Submitted successfully'));
+            return $this->refresh();
         }
 
         return $this->render('view', [
@@ -194,7 +200,10 @@ class ProblemController extends Controller
     protected function findModel($id)
     {
         if (($model = Problem::findOne($id)) !== null) {
-            if ($model->status == Problem::STATUS_VISIBLE) {
+            $isVisible = ($model->status == Problem::STATUS_VISIBLE);
+            $isPrivate = ($model->status == Problem::STATUS_PRIVATE);
+            if ($isVisible || ($isPrivate && !Yii::$app->user->isGuest &&
+                               (Yii::$app->user->identity->role === User::ROLE_VIP || Yii::$app->user->identity->role === User::ROLE_ADMIN))) {
                 return $model;
             } else {
                 throw new ForbiddenHttpException('You are not allowed to perform this action.');

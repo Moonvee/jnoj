@@ -21,11 +21,14 @@ foreach ($problems as $key => $p) {
 }
 ?>
 <div class="solution-index" style="margin-top: 20px">
-    <?php if (!empty($model->lock_board_time) && strtotime($model->lock_board_time) <= time() && strtotime($model->end_time) >= time() - 120 * 60) :?>
+    <?php if (!empty($model->lock_board_time) && strtotime($model->lock_board_time) <= time() &&
+              strtotime($model->end_time) >= time() - Yii::$app->setting->get('scoreboardFrozenTime')) :?>
         <p class="text-center">现已是封榜状态，榜单将不再实时更新，只显示封榜前的提交及您个人的所有提交记录。</p>
     <?php endif; ?>
     <?php Pjax::begin() ?>
+    <?php if ($model->type != \app\models\Contest::TYPE_OI || $model->getRunStatus() == \app\models\Contest::STATUS_ENDED): ?>
     <?= $this->render('_status_search', ['model' => $searchModel, 'nav' => $nav, 'contest_id' => $model->id]); ?>
+    <?php endif; ?>
 
     <?= GridView::widget([
         'layout' => '{items}{pager}',
@@ -33,7 +36,13 @@ foreach ($problems as $key => $p) {
         'options' => ['class' => 'table-responsive'],
         'tableOptions' => ['class' => 'table table-striped table-bordered'],
         'columns' => [
-            'id',
+            [
+                'attribute' => 'id',
+                'value' => function ($model, $key, $index, $column) {
+                    return Html::a($model->id, ['/solution/detail', 'id' => $model->id], ['target' => '_blank']);
+                },
+                'format' => 'raw'
+            ],
             [
                 'attribute' => 'who',
                 'value' => function ($model, $key, $index, $column) {
@@ -45,7 +54,10 @@ foreach ($problems as $key => $p) {
                 'label' => Yii::t('app', 'Problem'),
                 'value' => function ($model, $key, $index, $column) {
                     $res = $model->getProblemInContest();
-                    return Html::a(chr(65 + $res->num),
+                    if (!isset($res->num)) {
+                        return $model->problem->title;
+                    }
+                    return Html::a(chr(65 + $res->num) . ' - ' . $model->problem->title,
                         ['/contest/problem', 'id' => $res->contest_id, 'pid' => $res->num]);
                 },
                 'format' => 'raw'
@@ -53,9 +65,13 @@ foreach ($problems as $key => $p) {
             [
                 'attribute' => 'result',
                 'value' => function ($solution, $key, $index, $column) use ($model) {
+                    // OI 比赛模式未结束时不返回具体结果
+                    if ($model->type == \app\models\Contest::TYPE_OI && $model->getRunStatus() != \app\models\Contest::STATUS_ENDED) {
+                        return "Pending";
+                    }
                     if ($solution->result == $solution::OJ_CE || $solution->result == $solution::OJ_WA
                         || $solution->result == $solution::OJ_RE) {
-                        if (($solution->status == 1 && Yii::$app->params['isShareCode']) ||
+                        if (($solution->status == 1 && Yii::$app->setting->get('isShareCode')) ||
                             (!Yii::$app->user->isGuest && ($model->created_by == Yii::$app->user->id ||
                             ($solution->result == $solution::OJ_CE && Yii::$app->user->id == $solution->created_by)))) {
                             return Html::a($solution->getResult(),
@@ -70,6 +86,10 @@ foreach ($problems as $key => $p) {
                     }
                 },
                 'format' => 'raw'
+            ],
+            [
+                'attribute' => 'score',
+                'visible' => Yii::$app->setting->get('oiMode') && $model->getRunStatus() == \app\models\Contest::STATUS_ENDED
             ],
             [
                 'attribute' => 'time',
@@ -88,9 +108,7 @@ foreach ($problems as $key => $p) {
             [
                 'attribute' => 'language',
                 'value' => function ($solution, $key, $index, $column) use ($model) {
-                    if (($solution->status == 1 && Yii::$app->params['isShareCode'])
-                        || (!Yii::$app->user->isGuest &&
-                            ($model->created_by == Yii::$app->user->id || $solution->created_by == Yii::$app->user->id))) {
+                    if ($solution->canViewSource()) {
                         return Html::a($solution->getLang(),
                             ['/solution/source', 'id' => $solution->id],
                             ['onclick' => 'return false', 'data-click' => "solution_info", 'data-pjax' => 0]
@@ -105,8 +123,10 @@ foreach ($problems as $key => $p) {
             'created_at:datetime',
         ],
     ]); ?>
-    <?php
-    $js = "
+<?php
+$url = \yii\helpers\Url::toRoute(['/solution/verdict']);
+$loadingImgUrl = Yii::getAlias('@web/images/loading.gif');
+$js = <<<EOF
 $('[data-click=solution_info]').click(function() {
     $.ajax({
         url: $(this).attr('href'),
@@ -118,9 +138,9 @@ $('[data-click=solution_info]').click(function() {
         }
     });
 });
-";
-    $this->registerJs($js);
-    ?>
+EOF;
+$this->registerJs($js);
+?>
     <?php Pjax::end() ?>
 </div>
 <?php Modal::begin([

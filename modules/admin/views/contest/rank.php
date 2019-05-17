@@ -10,6 +10,8 @@ $rank_result = $model->getRankData(false);
 $first_blood = $rank_result['first_blood'];
 $result = $rank_result['rank_result'];
 $submit_count = $rank_result['submit_count'];
+
+$this->registerAssetBundle('yii\bootstrap\BootstrapPluginAsset');
 ?>
 
 <div class="wrap">
@@ -33,8 +35,7 @@ $submit_count = $rank_result['submit_count'];
                 <th width="60px">Rank</th>
                 <th width="120px">Username</th>
                 <th width="120px">Nickname</th>
-                <th width="70px">Solved</th>
-                <th width="80px">Time</th>
+                <th title="# solved / penalty time" colspan="2">Score</th>
                 <?php foreach($problems as $key => $p): ?>
                     <th>
                         <?= chr(65 + $key) ?>
@@ -79,11 +80,11 @@ $submit_count = $rank_result['submit_count'];
                     <th>
                         <?= Html::encode($rank['nickname']); ?>
                     </th>
-                    <th>
+                    <th class="score-solved">
                         <?= $rank['solved'] ?>
                     </th>
-                    <th>
-                        <?= round($rank['time'] / 60) ?>
+                    <th class="score-time">
+                        <?= intval($rank['time'] / 60) ?>
                     </th>
                     <?php
                     foreach($problems as $key => $p) {
@@ -96,14 +97,26 @@ $submit_count = $rank_result['submit_count'];
                             } else {
                                 $css_class = 'solved';
                             }
-                            $num = $rank['wa_count'][$p['problem_id']] + 1;
-                            $time = round($rank['ac_time'][$p['problem_id']] / 60);
+                            $num = $rank['ce_count'][$p['problem_id']] + $rank['wa_count'][$p['problem_id']] + 1;
+                            $time = intval($rank['ac_time'][$p['problem_id']]);
+                        } else if (isset($rank['pending'][$p['problem_id']]) && $rank['pending'][$p['problem_id']]) {
+                            $css_class = 'pending';
+                            $num = $rank['ce_count'][$p['problem_id']] + $rank['wa_count'][$p['problem_id']] + $rank['pending'][$p['problem_id']];
+                            $time = '';
                         } else if (isset($rank['wa_count'][$p['problem_id']])) {
                             $css_class = 'attempted';
-                            $num = $rank['wa_count'][$p['problem_id']];
-                            $time = '--';
+                            $num = $rank['ce_count'][$p['problem_id']] + $rank['wa_count'][$p['problem_id']];
+                            $time = '';
                         }
-                        echo "<th class=\"table-problem-cell {$css_class}\">{$num}<br><small>{$time}</small></th>";
+                        if ($num == 0) {
+                            $num = '';
+                            $span = '';
+                        } else if ($num == 1) {
+                            $span = 'try';
+                        } else {
+                            $span = 'tries';
+                        }
+                        echo "<th class=\"table-problem-cell {$css_class}\">{$time}<br><small>{$num} {$span}</small></th>";
                     }
                     ?>
                 </tr>
@@ -115,6 +128,6 @@ $submit_count = $rank_result['submit_count'];
 
 <footer class="footer">
     <div class="container">
-        <p class="pull-left">&copy; <?= Yii::$app->params['ojName'] ?> OJ <?= date('Y') ?></p>
+        <p class="pull-left">&copy; <?= Yii::$app->setting->get('ojName') ?> OJ <?= date('Y') ?></p>
     </div>
 </footer>

@@ -3,6 +3,7 @@
 namespace app\modules\admin\controllers;
 
 use app\models\ContestProblem;
+use app\models\ProblemSearch;
 use Yii;
 use yii\data\ActiveDataProvider;
 use yii\db\Query;
@@ -23,6 +24,7 @@ use app\modules\admin\models\UploadForm;
  */
 class ProblemController extends Controller
 {
+    public $enableCsrfValidation = false;
     public $layout = 'main';
     /**
      * @inheritdoc
@@ -60,12 +62,8 @@ class ProblemController extends Controller
      */
     public function actionIndex()
     {
-        $dataProvider = new ActiveDataProvider([
-            'query' => Problem::find()->orderBy(['id' => SORT_DESC])->with('user'),
-            'pagination' => [
-                'pageSize' => 50
-            ]
-        ]);
+        $searchModel = new ProblemSearch();
+        $dataProvider = $searchModel->search(Yii::$app->request->queryParams);
 
         if (Yii::$app->request->isPost) {
             $keys = Yii::$app->request->post('keylist');
@@ -80,6 +78,7 @@ class ProblemController extends Controller
 
         return $this->render('index', [
             'dataProvider' => $dataProvider,
+            'searchModel' => $searchModel
         ]);
     }
 
@@ -99,7 +98,7 @@ class ProblemController extends Controller
     }
 
     /**
-     * Displays a single Problem model.
+     * 预览问题页面
      * @param integer $id
      * @return mixed
      */
@@ -114,7 +113,7 @@ class ProblemController extends Controller
     }
 
     /**
-     * Import Problem.
+     * 导入问题页面
      * If update is successful, the browser will be redirected to the 'view' page.
      * @return mixed
      */
@@ -125,7 +124,7 @@ class ProblemController extends Controller
         if (Yii::$app->request->isPost) {
             $model->problemFile = UploadedFile::getInstance($model, 'problemFile');
             if ($model->upload()) {
-                Yii::$app->session->setFlash('success', Yii::t('app', 'Import Successfully'));
+                Yii::$app->session->setFlash('success', Yii::t('app', 'Imported Successfully'));
             }
             return $this->refresh();
         }
@@ -136,7 +135,7 @@ class ProblemController extends Controller
     }
 
     /**
-     * Create Problem model.
+     * 创建问题页面
      * If update is successful, the browser will be redirected to the 'view' page.
      * @return mixed
      */
@@ -174,46 +173,36 @@ class ProblemController extends Controller
     public function actionCreateFromPolygon()
     {
         if (Yii::$app->request->isPost) {
-            $id = intval(Yii::$app->request->post('polygon_problem_id'));
-            $polygonProblem = Yii::$app->db->createCommand('SELECT * FROM {{%polygon_problem}} WHERE id=:id', [':id' => $id])->queryOne();
-            if (!empty($polygonProblem)) {
-                $in = Yii::$app->db->createCommand('SELECT id FROM {{%problem}} WHERE polygon_problem_id=:id', [':id' => $id])->queryColumn();
-                $problem = new Problem();
-                if (!empty($in)) {
-                    $problem = Problem::findOne(['polygon_problem_id' => $id]);
-                    $this->makeDirEmpty(Yii::$app->params['judgeProblemDataPath'] . $problem->id);
+            $id = Yii::$app->request->post('polygon_problem_id');
+            $fromId = Yii::$app->request->post('polygon_problem_id_from');
+            $toId = Yii::$app->request->post('polygon_problem_id_to');
+            if (!empty($id)) {
+                if ($this->synchronizeProblemFromPolygon($id)) {
+                    Yii::$app->session->setFlash('success', $id . ' created Successfully.');
+                } else {
+                    Yii::$app->session->setFlash('error', $id . ' no such problem.');
                 }
-                $problem->title = $polygonProblem['title'];
-                $problem->description = $polygonProblem['description'];
-                $problem->input = $polygonProblem['input'];
-                $problem->output = $polygonProblem['output'];
-                $problem->sample_input = $polygonProblem['sample_input'];
-                $problem->sample_output = $polygonProblem['sample_output'];
-                $problem->spj = $polygonProblem['spj'];
-                $problem->hint = $polygonProblem['hint'];
-                $problem->memory_limit = $polygonProblem['memory_limit'];
-                $problem->time_limit = $polygonProblem['time_limit'];
-                $problem->created_by = $polygonProblem['created_by'];
-                $problem->tags = $polygonProblem['tags'];
-                $problem->status = Problem::STATUS_HIDDEN;
-                $problem->polygon_problem_id = $id;
-                $problem->save();
-
-                $this->copyDir(Yii::$app->params['polygonProblemDataPath'] . $polygonProblem['id'], Yii::$app->params['judgeProblemDataPath'] . $problem->id);
-                Yii::$app->session->setFlash('success', Yii::t('app', 'Create Successfully'));
-                return $this->redirect(['view', 'id' => $problem->id]);
+            } else if (!empty($fromId) && !empty($toId)) {
+                $fromId = intval($fromId);
+                $toId = intval($toId);
+                for ($i = $fromId; $i <= $toId; $i++) {
+                    $this->synchronizeProblemFromPolygon($i);
+                }
+                Yii::$app->session->setFlash('success', Yii::t('app', 'Submitted successfully'));
             } else {
-                Yii::$app->session->setFlash('error', Yii::t('app', 'No such problem.'));
+                Yii::$app->session->setFlash('error', '请填好表单');
             }
+            return $this->redirect(['index']);
         }
         return $this->render('create_from_polygon');
     }
 
     /**
-     * Updates an existing Problem model.
+     * 修改问题页面
      * If update is successful, the browser will be redirected to the 'view' page.
      * @param integer $id
      * @return mixed
+     * @throws NotFoundHttpException
      */
     public function actionUpdate($id)
     {
@@ -233,6 +222,12 @@ class ProblemController extends Controller
         ]);
     }
 
+    /**
+     * 查看测试数据
+     * @param $id
+     * @return string
+     * @throws NotFoundHttpException
+     */
     public function actionTestData($id)
     {
         $model = $this->findModel($id);
@@ -247,85 +242,124 @@ class ProblemController extends Controller
     }
 
     /**
-     * Displays source of a single Solution model.
-     * @param integer $id
-     * @return mixed
-     * @throws ForbiddenHttpException if the model cannot be viewed.
+     * 下载测试数据
      */
-    public function actionSource($id, $solution_id)
+    public function actionDownloadData($id)
     {
-        $solution = Yii::$app->db->createCommand('SELECT * FROM {{%solution}} WHERE id=:id', [':id' => intval($solution_id)])->queryOne();
-        return $this->render('source', [
-            'model' => $this->findModel($id),
-            'solution' => $solution
-        ]);
+        $model = $this->findModel($id);
+        $filename = Yii::$app->params['judgeProblemDataPath'] . $model->id;
+        $zipName = '/tmp/' . time() . $id . '.zip';
+        if (!file_exists($filename)) {
+            return false;
+        }
+        $zipArc = new \ZipArchive();
+        if (!$zipArc->open($zipName, \ZipArchive::CREATE)) {
+            return false;
+        }
+        $res = $zipArc->addGlob("{$filename}/*", GLOB_BRACE, ['remove_all_path' => true]);
+        $zipArc->close();
+        if (!$res) {
+            return false;
+        }
+        if (!file_exists($zipName)) {
+            return false;
+        }
+        Yii::$app->response->on(\yii\web\Response::EVENT_AFTER_SEND, function($event) { unlink($event->data); }, $zipName);
+        return Yii::$app->response->sendFile($zipName, $model->id . '-' . $model->title . '.zip');
     }
 
     /**
-     * Displays result of a single Solution model.
-     * @param integer $id
-     * @return mixed
-     */
-    public function actionResult($id, $solution_id)
-    {
-        $solution = Yii::$app->db->createCommand('SELECT * FROM {{%solution_info}} WHERE solution_id=:id', [':id' => intval($solution_id)])->queryOne();
-        return $this->render('result', [
-            'model' => $this->findModel($id),
-            'solution' => $solution
-        ]);
-    }
-
-    /**
+     * 验证数据
      * @param $id
-     * @return mixed
+     * @return string|\yii\web\Response
+     * @throws NotFoundHttpException
      */
-    public function actionTestStatus($id)
+    public function actionVerify($id)
     {
-        $this->layout = false;
         $model = $this->findModel($id);
         $solutions = (new Query())->select('id, result, created_at, memory, time, language, code_length')
             ->from('{{%solution}}')
-            ->where(['problem_id' => $id, 'status' => 0])
+            ->where(['problem_id' => $id, 'status' => Solution::STATUS_TEST])
             ->limit(10)
             ->orderBy(['id' => SORT_DESC])
             ->all();
-        return $this->render('test_status', [
+        $newSolution = new Solution();
+        $newSolution->language = Yii::$app->user->identity->language;
+
+        if ($newSolution->load(Yii::$app->request->post())) {
+            $newSolution->problem_id = $id;
+            $newSolution->status = Solution::STATUS_TEST;
+            if ($newSolution->save()) {
+                Yii::$app->session->setFlash('success', Yii::t('app', 'Submitted successfully'));
+            } else {
+                Yii::$app->session->setFlash('error', 'Please select a language');
+            }
+            return $this->refresh();
+        }
+        return $this->render('verify', [
             'solutions' => $solutions,
+            'newSolution' => $newSolution,
             'model' => $model
         ]);
     }
 
     /**
+     * Spj 页面
      * @param $id
-     * @return mixed
-     * @throws ForbiddenHttpException if the model cannot be viewed
+     * @return string
+     * @throws NotFoundHttpException
      */
-    public function actionTestSubmit($id)
+    public function actionSpj($id)
     {
-        $solution = new Solution();
+        $model = $this->findModel($id);
 
-        if ($solution->load(Yii::$app->request->post())) {
-            $solution->problem_id = $id;
-            $solution->status = 0;
-            if ($solution->save()) {
-                Yii::$app->session->setFlash('success', 'Submit Successfully');
-            } else {
-                Yii::$app->session->setFlash('error', 'Please select a language');
+        $dataPath = Yii::$app->params['judgeProblemDataPath'] . $model->id;
+        $spjContent = '';
+        if (file_exists($dataPath . '/spj.cc')) {
+            $spjContent = file_get_contents($dataPath . '/spj.cc');
+        } else if (file_exists($dataPath . '/spj.c')) {
+            $spjContent = file_get_contents($dataPath . '/spj.c');
+        }
+        if (Yii::$app->request->isPost) {
+            $spjContent = Yii::$app->request->post('spjContent');
+            if (!is_dir($dataPath)) {
+                mkdir($dataPath);
             }
-            return $this->redirect('index');
+            $fp = fopen($dataPath . '/spj.cc',"w");
+            fputs($fp, $spjContent);
+            fclose($fp);
+            exec("g++ -fno-asm -std=c++11 -O2 {$dataPath}/spj.cc -o {$dataPath}/spj -I" . Yii::getAlias('@app/libraries'));
         }
 
-        if (Yii::$app->request->isAjax) {
-            $this->layout = false;
-            $model = $this->findModel($id);
+        return $this->render('spj', [
+            'model' => $model,
+            'spjContent' => $spjContent
+        ]);
+    }
 
-            return $this->render('test_submit', [
-                'solution' => $solution,
-                'model' => $model
-            ]);
+    public function actionSubtask($id)
+    {
+        $model = $this->findModel($id);
+
+        $dataPath = Yii::$app->params['judgeProblemDataPath'] . $model->id;
+        $subtaskContent = '';
+
+        if (file_exists($dataPath . '/config')) {
+            $subtaskContent = file_get_contents($dataPath . '/config');
         }
-
-        throw new ForbiddenHttpException('You are not allowed to perform this action.');
+        if (Yii::$app->request->isPost) {
+            $spjContent = Yii::$app->request->post('subtaskContent');
+            if (!is_dir($dataPath)) {
+                mkdir($dataPath);
+            }
+            $fp = fopen($dataPath . '/config',"w");
+            fputs($fp, $spjContent);
+            fclose($fp);
+        }
+        return $this->render('subtask', [
+            'model' => $model,
+            'subtaskContent' => $subtaskContent
+        ]);
     }
 
     /**
@@ -333,6 +367,7 @@ class ProblemController extends Controller
      * If deletion is successful, the browser will be redirected to the 'index' page.
      * @param integer $id
      * @return mixed
+     * @throws NotFoundHttpException
      */
     public function actionDelete($id)
     {
@@ -394,5 +429,46 @@ class ProblemController extends Controller
             }
         }
         closedir($dh);
+    }
+
+    /**
+     * 根据 id 来同步 polygon 的题目到题库中
+     * @param $id integer
+     */
+    protected function synchronizeProblemFromPolygon($id)
+    {
+        $id = intval($id);
+        $polygonProblem = Yii::$app->db->createCommand('SELECT * FROM {{%polygon_problem}} WHERE id=:id', [':id' => $id])->queryOne();
+        if (!empty($polygonProblem)) {
+            $in = Yii::$app->db->createCommand('SELECT id FROM {{%problem}} WHERE polygon_problem_id=:id', [':id' => $id])->queryColumn();
+            $problem = new Problem();
+            if (!empty($in)) {
+                $problem = Problem::findOne(['polygon_problem_id' => $id]);
+                $this->makeDirEmpty(Yii::$app->params['judgeProblemDataPath'] . $problem->id);
+            }
+            $problem->title = $polygonProblem['title'];
+            $problem->description = $polygonProblem['description'];
+            $problem->input = $polygonProblem['input'];
+            $problem->output = $polygonProblem['output'];
+            $problem->sample_input = $polygonProblem['sample_input'];
+            $problem->sample_output = $polygonProblem['sample_output'];
+            $problem->spj = $polygonProblem['spj'];
+            $problem->hint = $polygonProblem['hint'];
+            $problem->memory_limit = $polygonProblem['memory_limit'];
+            $problem->time_limit = $polygonProblem['time_limit'];
+            $problem->created_by = $polygonProblem['created_by'];
+            $problem->tags = $polygonProblem['tags'];
+            $problem->status = Problem::STATUS_HIDDEN;
+            $problem->polygon_problem_id = $id;
+            $problem->save();
+
+            $this->copyDir(Yii::$app->params['polygonProblemDataPath'] . $polygonProblem['id'], Yii::$app->params['judgeProblemDataPath'] . $problem->id);
+            
+            // 给 SPJ 添加可执行权限
+            $dataPath = Yii::$app->params['judgeProblemDataPath'] . $problem->id;
+            exec("chmod +x {$dataPath}/spj");
+            return true;
+        }
+        return false;
     }
 }

@@ -17,7 +17,8 @@ AppAsset::register($this);
 <html lang="<?= Yii::$app->language ?>">
 <head>
     <meta charset="<?= Yii::$app->charset ?>">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="renderer" content="webkit">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <?= Html::csrfMetaTags() ?>
     <title><?= Html::encode($this->title) ?></title>
@@ -47,7 +48,7 @@ AppAsset::register($this);
     </header>
     <?php
     NavBar::begin([
-        'brandLabel' => Yii::$app->params['ojName'] . ' OJ',
+        'brandLabel' => Yii::$app->setting->get('ojName') . ' OJ',
         'brandUrl' => Yii::$app->homeUrl,
         'options' => [
             'class' => 'navbar-default',
@@ -57,11 +58,18 @@ AppAsset::register($this);
         ['label' => '<span class="glyphicon glyphicon-home"></span> ' . Yii::t('app', 'Home'), 'url' => ['/site/index']],
         ['label' => '<span class="glyphicon glyphicon-list"></span> ' . Yii::t('app', 'Problems'), 'url' => ['/problem/index']],
         ['label' => '<span class="glyphicon glyphicon-signal"></span> ' . Yii::t('app', 'Status'), 'url' => ['/solution/index']],
-        ['label' => '<span class="glyphicon glyphicon-king"></span> ' . Yii::t('app', 'Rating'), 'url' => ['/rating/index']],
-        ['label' => '<span class="glyphicon glyphicon-book"></span> ' . Yii::t('app', 'Homework'), 'url' => ['/homework/index']],
+        [
+            'label' => '<span class="glyphicon glyphicon-king"></span> ' . Yii::t('app', 'Rating'),
+            'url' => ['/rating/problem'],
+            'active' => Yii::$app->controller->id == 'rating'
+        ],
+        [
+            'label' => '<span class="glyphicon glyphicon-user"></span> ' . Yii::t('app', 'Group'),
+            'url' => Yii::$app->user->isGuest ? ['/group/index'] : ['/group/my-group']
+        ],
         ['label' => '<span class="glyphicon glyphicon-knight"></span> ' . Yii::t('app', 'Contests'), 'url' => ['/contest/index']],
         [
-            'label' => '<span class="glyphicon glyphicon-info-sign"></span> Wiki',
+            'label' => '<span class="glyphicon glyphicon-info-sign"></span> '. Yii::t('app', 'Wiki'),
             'url' => ['/wiki/index'],
             'active' => Yii::$app->controller->id == 'wiki'
         ],
@@ -107,41 +115,14 @@ AppAsset::register($this);
 
 <footer class="footer">
     <div class="container">
-        <p class="pull-left">&copy; <?= Yii::$app->params['ojName'] ?> OJ <?= date('Y') ?></p>
+        <p class="pull-left">&copy; <?= Yii::$app->setting->get('ojName') ?> OJ <?= date('Y') ?></p>
     </div>
 </footer>
 
 <?php $this->endBody() ?>
 <script type="text/javascript">
     (function ($) {
-        $(document).ready(function () {
-            $(".katex.math.inline").each(function () {
-                var parent = $(this).parent()[0];
-                if (parent.localName !== "code") {
-                    var texTxt = $(this).text();
-                    var el = $(this).get(0);
-                    try {
-                        katex.render(texTxt, el);
-                    } catch (err) {
-                        $(this).html("<span class=\'err\'>" + err);
-                    }
-                } else {
-                    $(this).parent().text($(this).parent().text());
-                }
-            });
-            $(".katex.math.multi-line").each(function () {
-                var texTxt = $(this).text();
-                var el = $(this).get(0);
-                try {
-                    katex.render(texTxt, el, {displayMode: true})
-                } catch (err) {
-                    $(this).html("<span class=\'err\'>" + err)
-                }
-            });
-            $('.pre p').each(function(i, block) {  // use <pre><p>
-                hljs.highlightBlock(block);
-            });
-        })
+
     })(jQuery);
 </script>
 </body>

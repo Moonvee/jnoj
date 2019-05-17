@@ -18,23 +18,41 @@ $this->params['breadcrumbs'][] = ['label' => $model->title, 'url' => ['view', 'i
             ['label' => Yii::t('app', 'Preview'), 'url' => ['/admin/problem/view', 'id' => $model->id]],
             ['label' => Yii::t('app', 'Edit'), 'url' => ['/admin/problem/update', 'id' => $model->id]],
             ['label' => Yii::t('app', 'Tests Data'), 'url' => ['/admin/problem/test-data', 'id' => $model->id]],
+            ['label' => Yii::t('app', 'Verify Data'), 'url' => ['/admin/problem/verify', 'id' => $model->id]],
+            ['label' => Yii::t('app', 'SPJ'), 'url' => ['/admin/problem/spj', 'id' => $model->id]],
+            ['label' => Yii::t('app', 'Subtask'), 'url' => ['/admin/problem/subtask', 'id' => $model->id]]
         ],
     ]) ?>
 </div>
+<hr>
 <div class="solutions-view">
     <h1>
         <?= Html::encode($model->title) ?>
     </h1>
 
-    <p class="bg-danger">
-        一个标准输入文件对应一个标准输出文件，输入文件以＂.in＂结尾，输出文件以＂.out＂结尾，文件名任意取，
-        但输入文件跟输出文件的文件名必须一一对应．比如一组样例: 输入文件文件名"apple.in"，输出文件文件名"apple.out"．
+    <p>
+        一个标准输入文件对应一个标准输出文件，输入文件以<code>.in</code>结尾，输出文件以<code>.out</code>或者
+        <code>.out</code>结尾，文件名任意取，
+        但输入文件跟输出文件的文件名必须一一对应．比如一组样例: 输入文件文件名<code>apple.in</code>，
+        输出文件文件名<code>apple.out</code> 或者 <code>apple.ans</code>。
         如有多个测试点，可以分开不同的文件上传
     </p>
 
     <?= \app\widgets\webuploader\MultiImage::widget() ?>
 
+
     <div class="row table-responsive">
+        <div class="col-md-12">
+            <?php if (extension_loaded('zip')): ?>
+                <p>
+                    <?= Html::a('下载全部数据', ['download-data', 'id' => $model->id], ['class' => 'btn btn-success']); ?>
+                </p>
+            <?php else: ?>
+                <p>
+                    服务器未启用 php-zip 扩展，如需下载测试数据，请安装 php-zip　扩展。
+                </p>
+            <?php endif; ?>
+        </div>
         <div class="col-md-6">
             <table class="table table-bordered table-rank">
                 <caption>标准输入文件</caption>
@@ -54,13 +72,15 @@ $this->params['breadcrumbs'][] = ['label' => $model->title, 'url' => ['view', 'i
                         <th><?= $file['size'] ?></th>
                         <th><?= date('Y-m-d H:i', $file['time']) ?></th>
                         <th>
-                            <a href="<?= Url::toRoute(['/admin/problem/viewfile', 'id' => $model->id, 'name' => $file['name']]) ?>" target="_blank">
+                            <a href="<?= Url::toRoute(['/admin/problem/viewfile', 'id' => $model->id,'name' => $file['name']]) ?>"
+                               target="_blank"
+                               title="<?= Yii::t('app', 'View') ?>">
                                 <span class="glyphicon glyphicon-eye-open"></span>
-                                <?= Yii::t('app', 'View') ?>
                             </a>
-                            <a href="<?= Url::toRoute(['/admin/problem/deletefile', 'id' => $model->id, 'name' => $file['name']]) ?>">
+                            &nbsp;
+                            <a href="<?= Url::toRoute(['/admin/problem/deletefile', 'id' => $model->id,'name' => $file['name']]) ?>"
+                               title="<?= Yii::t('app', 'Delete') ?>">
                                 <span class="glyphicon glyphicon-remove"></span>
-                                <?= Yii::t('app', 'Delete') ?>
                             </a>
                         </th>
                     </tr>
@@ -78,7 +98,7 @@ $this->params['breadcrumbs'][] = ['label' => $model->title, 'url' => ['view', 'i
                 </tr>
                 <?php foreach ($files as $file): ?>
                     <?php
-                    if (!strpos($file['name'], '.out'))
+                    if (!strpos($file['name'], '.out') && !strpos($file['name'], '.ans'))
                         continue;
                     ?>
                     <tr>
@@ -86,13 +106,15 @@ $this->params['breadcrumbs'][] = ['label' => $model->title, 'url' => ['view', 'i
                         <th><?= $file['size'] ?></th>
                         <th><?= date('Y-m-d H:i', $file['time']) ?></th>
                         <th>
-                            <a href="<?= Url::toRoute(['/admin/problem/viewfile', 'id' => $model->id, 'name' => $file['name']]) ?>" target="_blank">
+                            <a href="<?= Url::toRoute(['/admin/problem/viewfile', 'id' => $model->id,'name' => $file['name']]) ?>"
+                               target="_blank"
+                               title="<?= Yii::t('app', 'View') ?>">
                                 <span class="glyphicon glyphicon-eye-open"></span>
-                                <?= Yii::t('app', 'View') ?>
                             </a>
-                            <a href="<?= Url::toRoute(['/admin/problem/deletefile', 'id' => $model->id, 'name' => $file['name']]) ?>">
+                            &nbsp;
+                            <a href="<?= Url::toRoute(['/admin/problem/deletefile', 'id' => $model->id,'name' => $file['name']]) ?>"
+                               title="<?= Yii::t('app', 'Delete') ?>">
                                 <span class="glyphicon glyphicon-remove"></span>
-                                <?= Yii::t('app', 'Delete') ?>
                             </a>
                         </th>
                     </tr>

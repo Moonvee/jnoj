@@ -39,7 +39,6 @@ foreach ($problems as $key => $p) {
         <?= Html::a('已阅读上述内容，并将提交记录展示在前台', ['/admin/contest/status', 'id' => $model->id, 'active' => 1], ['class' => 'btn btn-danger']) ?>
         <?php Modal::end(); ?>
 
-
         <?= Html::a('在前台隐藏提交记录', ['/admin/contest/status', 'id' => $model->id, 'active' => 2], ['class' => 'btn btn-default']) ?>
 
         <?php Pjax::begin() ?>
@@ -51,7 +50,13 @@ foreach ($problems as $key => $p) {
                 'dataProvider' => $dataProvider,
                 'options' => ['class' => 'table-responsive'],
                 'columns' => [
-                    'id',
+                    [
+                        'attribute' => 'id',
+                        'value' => function ($model, $key, $index, $column) {
+                            return Html::a($model->id, ['/solution/detail', 'id' => $model->id], ['target' => '_blank']);
+                        },
+                        'format' => 'raw'
+                    ],
                     [
                         'attribute' => 'who',
                         'value' => function ($model, $key, $index, $column) {
@@ -63,7 +68,7 @@ foreach ($problems as $key => $p) {
                         'label' => Yii::t('app', 'Problem'),
                         'value' => function ($model, $key, $index, $column) {
                             $res = $model->getProblemInContest();
-                            return Html::a(chr(65 + $res->num),
+                            return Html::a(chr(65 + $res->num) . ' - ' . $model->problem->title,
                                 ['/contest/problem', 'id' => $res->contest_id, 'pid' => $res->num]);
                         },
                         'format' => 'raw'
@@ -82,6 +87,10 @@ foreach ($problems as $key => $p) {
                             }
                         },
                         'format' => 'raw'
+                    ],
+                    [
+                        'attribute' => 'score',
+                        'visible' => Yii::$app->setting->get('oiMode')
                     ],
                     [
                         'attribute' => 'time',
@@ -113,21 +122,57 @@ foreach ($problems as $key => $p) {
             ]); ?>
         </div>
         <?php
-        $js = "
-        $('[data-click=solution_info]').click(function() {
-            $.ajax({
-                url: $(this).attr('href'),
-                type:'post',
-                error: function(){alert('error');},
-                success:function(html){
-                    $('#solution-content').html(html);
-                    $('#solution-info').modal('show');
-                }
-            });
+$url = \yii\helpers\Url::toRoute(['/solution/verdict']);
+$loadingImgUrl = Yii::getAlias('@web/images/loading.gif');
+$js = <<<EOF
+$('[data-click=solution_info]').click(function() {
+    $.ajax({
+        url: $(this).attr('href'),
+        type:'post',
+        error: function(){alert('error');},
+        success:function(html){
+            $('#solution-content').html(html);
+            $('#solution-info').modal('show');
+        }
+    });
+});
+function updateVerdictByKey(submission) {
+    $.get({
+        url: "{$url}?id=" + submission.attr('data-submissionid'),
+        success: function(data) {
+            var obj = JSON.parse(data);
+            submission.attr("waiting", obj.waiting);
+            submission.text(obj.result);
+            if (obj.result === "Accepted") {
+                submission.attr("class", "text-success")
+            }
+            if (obj.waiting === "true") {
+                submission.append('<img src="{$loadingImgUrl}" alt="loading">');
+            }
+        }
+    });
+}
+var waitingCount = $("strong[waiting=true]").length;
+if (waitingCount > 0) {
+    console.log("There is waitingCount=" + waitingCount + ", starting submissionsEventCatcher...");
+    var interval = null;
+    var testWaitingsDone = function () {
+        var waitingCount = $("strong[waiting=true]").length;
+        console.log("There is waitingCount=" + waitingCount + ", starting submissionsEventCatcher...");
+        $("strong[waiting=true]").each(function(){
+            updateVerdictByKey($(this));
         });
-        ";
-        $this->registerJs($js);
-        ?>
+        if (interval && waitingCount === 0) {
+            console.log("Stopping submissionsEventCatcher.");
+            clearInterval(interval);
+            interval = null;
+        }
+    }
+    interval = setInterval(testWaitingsDone, 1000);
+}
+EOF;
+$this->registerJs($js);
+?>
         <?php Pjax::end() ?>
     </div>
 </div>

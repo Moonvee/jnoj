@@ -26,14 +26,13 @@ use yii\helpers\Url;
 
     <?= $form->field($model, 'status')->radioList([
         1 => Yii::t('app', 'Visible'),
-        0 => Yii::t('app', 'Hidden')
-    ])->hint(Yii::t('app', '选择可见，题目将在首页展示．如果要准备比赛，此处应选隐藏．')) ?>
-
+        0 => Yii::t('app', 'Hidden'),
+        2 => Yii::t('app', 'Private')
+    ])->hint(Yii::t('app', '可见：题目将在首页展示，任何用户可见。隐藏：题目仅在后台显示。私有：题目标题在前台可见，但信息仅VIP用户可见')) ?>
 
     <?= $form->field($model, 'description')->widget('app\widgets\ckeditor\CKeditor'); ?>
 
     <?= $form->field($model, 'input')->widget('app\widgets\ckeditor\CKeditor'); ?>
-
 
     <?= $form->field($model, 'output')->widget('app\widgets\ckeditor\CKeditor'); ?>
 
@@ -63,7 +62,7 @@ use yii\helpers\Url;
     <?= $form->field($model, 'spj')->radioList([
         '1' => Yii::t('app', 'Yes'),
         '0' => Yii::t('app', 'No')
-    ])?>
+    ]) ?>
 
 
     <?= $form->field($model, 'hint')->widget('app\widgets\ckeditor\CKeditor'); ?>

@@ -2,10 +2,13 @@
 
 namespace app\controllers;
 
+use app\models\ContestPrint;
+use app\models\User;
 use Yii;
 use yii\db\Expression;
 use yii\db\Query;
 use yii\data\ActiveDataProvider;
+use yii\helpers\Html;
 use yii\web\Controller;
 use yii\web\NotFoundHttpException;
 use yii\web\ForbiddenHttpException;
@@ -47,9 +50,9 @@ class ContestController extends Controller
         $this->layout = 'main';
         $dataProvider = new ActiveDataProvider([
             'query' => Contest::find()->where([
-                'status' => Contest::STATUS_VISIBLE
+                '<>', 'status', Contest::STATUS_HIDDEN
             ])->andWhere([
-                '<>', 'type', Contest::TYPE_HOMEWORK
+                'group_id' => 0
             ])->orderBy(['id' => SORT_DESC]),
         ]);
 
@@ -67,7 +70,18 @@ class ContestController extends Controller
     {
         $model = $this->findModel($id);
         $searchModel = new SolutionSearch();
+        // 访问权限检查
+        if (!$model->canView()) {
+            return $this->render('/contest/forbidden', ['model' => $model]);
+        }
 
+        if (Yii::$app->request->isPjax) {
+            return $this->renderAjax('/contest/status', [
+                'model' => $model,
+                'searchModel' => $searchModel,
+                'dataProvider' => $searchModel->search(Yii::$app->request->queryParams, $model->id)
+            ]);
+        }
         return $this->render('/contest/status', [
             'model' => $model,
             'searchModel' => $searchModel,
@@ -81,20 +95,22 @@ class ContestController extends Controller
      * @param $cid
      * @return mixed
      * @throws ForbiddenHttpException if the model cannot be viewed
+     * @throws NotFoundHttpException
      */
     public function actionSubmission($pid, $cid, $uid)
     {
         $this->layout = false;
         $model = $this->findModel($cid);
 
-        if ($model->runStatus != Contest::STATUS_ENDED && !Yii::$app->user->isGuest && Yii::$app->user->id != $model->created_by) {
+        // 访问权限检查，代码仅作者可见
+        if ($model->getRunStatus() != Contest::STATUS_ENDED && !Yii::$app->user->isGuest && Yii::$app->user->id != $model->created_by) {
             throw new ForbiddenHttpException('You are not allowed to perform this action.');
         }
-        $submissions = Yii::$app->db
-            ->createCommand(
-                'SELECT id, result, created_at FROM {{%solution}} WHERE problem_id=:pid AND contest_id=:cid AND created_by=:uid ORDER BY id DESC',
-                [':pid' => $pid, ':cid' => $model->id, ':uid' => $uid]
-            )->queryAll();
+        $submissions = Yii::$app->db->createCommand(
+            'SELECT id, result, created_at FROM {{%solution}} WHERE problem_id=:pid AND contest_id=:cid AND created_by=:uid ORDER BY id DESC',
+            [':pid' => $pid, ':cid' => $model->id, ':uid' => $uid]
+        )->queryAll();
+
         return $this->render('submission', [
             'submissions' => $submissions
         ]);
@@ -104,6 +120,7 @@ class ContestController extends Controller
      * 显示注册参赛的用户
      * @param integer $id
      * @return mixed
+     * @throws NotFoundHttpException if the contest cannot be found
      */
     public function actionUser($id)
     {
@@ -128,7 +145,7 @@ class ContestController extends Controller
      * @param integer $register 等于 0 什么也不做，等于 1 就将当前用户注册到比赛列表中
      * @return mixed
      * @throws NotFoundHttpException if the contest cannot be found
-     * @throws ForbiddenHttpException if the contest if offline
+     * @throws ForbiddenHttpException
      */
     public function actionRegister($id, $register = 0)
     {
@@ -140,6 +157,11 @@ class ContestController extends Controller
 
         // 线下赛只能在后台加入，在此处不给注册
         if ($model->scenario == Contest::SCENARIO_OFFLINE) {
+            throw new ForbiddenHttpException('You are not allowed to perform this action.');
+        }
+
+        // 设为私有的比赛只能在后台加入，在此处不给注册
+        if ($model->status == Contest::STATUS_PRIVATE) {
             throw new ForbiddenHttpException('You are not allowed to perform this action.');
         }
 
@@ -157,6 +179,46 @@ class ContestController extends Controller
     }
 
     /**
+     * 代码打印页面
+     * @param $id
+     * @return string
+     * @throws ForbiddenHttpException
+     * @throws NotFoundHttpException
+     */
+    public function actionPrint($id)
+    {
+        $model = $this->findModel($id);
+        $newContestPrint = new ContestPrint();
+
+        // 访问权限检查
+        if (!$model->canView()) {
+            return $this->render('/contest/forbidden', ['model' => $model]);
+        }
+        // 只能在线下赛未结束时访问
+        if ($model->scenario != Contest::SCENARIO_OFFLINE || $model->getRunStatus() == Contest::STATUS_ENDED) {
+            throw new ForbiddenHttpException('该比赛现不提供打印服务功能。');
+        }
+
+        if ($newContestPrint->load(Yii::$app->request->post())) {
+            $newContestPrint->contest_id = $model->id;
+            $newContestPrint->save();
+            return $this->redirect(['print', 'id' => $model->id]);
+        }
+
+        $query = ContestPrint::find()->where(['contest_id' => $model->id, 'user_id' => Yii::$app->user->id])->with('user');
+
+        $dataProvider = new ActiveDataProvider([
+            'query' => $query,
+        ]);
+
+        return $this->render('print', [
+            'model' => $model,
+            'dataProvider' => $dataProvider,
+            'newContestPrint' => $newContestPrint
+        ]);
+    }
+
+    /**
      * Displays a single Contest model.
      * @param integer $id
      * @return mixed
@@ -165,21 +227,31 @@ class ContestController extends Controller
     public function actionView($id)
     {
         $model = $this->findModel($id);
-
+        // 访问权限检查
+        if (!$model->canView()) {
+            return $this->render('/contest/forbidden', ['model' => $model]);
+        }
         $dataProvider = new ActiveDataProvider([
             'query' => ContestAnnouncement::find()->where(['contest_id' => $model->id]),
         ]);
 
-        return $this->render('view', [
+        return $this->render('/contest/view', [
             'model' => $model,
             'dataProvider' => $dataProvider
         ]);
     }
 
+    /**
+     * 比赛题解
+     * @param $id
+     * @return string|\yii\web\Response
+     * @throws ForbiddenHttpException
+     */
     public function actionEditorial($id)
     {
         $model = $this->findModel($id);
 
+        // 只能在比赛结束时访问
         if ($model->getRunStatus() == Contest::STATUS_ENDED) {
             return $this->render('/contest/editorial', [
                 'model' => $model
@@ -199,6 +271,10 @@ class ContestController extends Controller
     public function actionClarify($id, $cid = -1)
     {
         $model = $this->findModel($id);
+        // 访问权限检查
+        if (!$model->canView()) {
+            return $this->render('/contest/forbidden', ['model' => $model]);
+        }
         $newClarify = new Discuss();
         $discuss = null;
         $dataProvider = new ActiveDataProvider([
@@ -211,10 +287,12 @@ class ContestController extends Controller
             }
         }
         if (!Yii::$app->user->isGuest && $newClarify->load(Yii::$app->request->post())) {
-            // 判断是否已经参赛
+            // 判断是否已经参赛，提交即参加比赛
             if (!$model->isUserInContest()) {
-                Yii::$app->session->setFlash('error', 'Submit Failed. You did not register for the contest.');
-                return $this->refresh();
+                Yii::$app->db->createCommand()->insert('{{%contest_user}}', [
+                   'contest_id' => $model->id,
+                   'user_id' => Yii::$app->user->id
+                ])->execute();
             }
             $newClarify->entity = Discuss::ENTITY_CONTEST;
             $newClarify->entity_id = $model->id;
@@ -232,7 +310,22 @@ class ContestController extends Controller
             }
             $newClarify->status = Discuss::STATUS_PRIVATE;
             $newClarify->save();
-            Yii::$app->session->setFlash('success', 'Submit Successfully');
+
+            // 给所有管理员发送弹窗提醒
+            try {
+                $client = stream_socket_client('tcp://0.0.0.0:2121', $errno, $errmsg, 1);
+                $uids = Yii::$app->db->createCommand('SELECT id FROM user WHERE role=' . User::ROLE_ADMIN)->queryColumn();
+                $content = '比赛：' . $model->title .  ' - 有了新的答疑，请到后台查看并回复。';
+                foreach ($uids as $uid) {
+                    fwrite($client, json_encode([
+                        'uid' => $uid,
+                        'content' => $content
+                    ]) . "\n");
+                }
+            } catch (\Exception $e) {
+                echo 'Caught exception: ',  $e->getMessage(), "\n";
+            }
+            Yii::$app->session->setFlash('success', Yii::t('app', 'Submitted successfully'));
             return $this->refresh();
         }
         $query = Discuss::find()
@@ -271,7 +364,14 @@ class ContestController extends Controller
     public function actionStanding($id)
     {
         $model = $this->findModel($id);
-        return $this->render('standing', [
+        // 访问权限检查
+        if (!$model->canView()) {
+            return $this->render('/contest/forbidden', ['model' => $model]);
+        }
+        if ($model->type == Contest::TYPE_OI && $model->getRunStatus() != Contest::STATUS_ENDED) {
+            throw new ForbiddenHttpException('You are not allowed to perform this action.');
+        }
+        return $this->render('/contest/standing', [
             'model' => $model
         ]);
     }
@@ -285,14 +385,23 @@ class ContestController extends Controller
     public function actionProblem($id, $pid = 0)
     {
         $model = $this->findModel($id);
+        // 访问权限检查
+        if (!$model->canView()) {
+            return $this->render('/contest/forbidden', ['model' => $model]);
+        }
         $solution = new Solution();
 
         $problem = $model->getProblemById(intval($pid));
 
         if (!Yii::$app->user->isGuest && $solution->load(Yii::$app->request->post())) {
             if (!$model->isUserInContest()) {
-                Yii::$app->session->setFlash('error', 'Submit Failed. You did not register for the contest.');
-                return $this->refresh();
+                // 判断是否已经参赛，提交即参加比赛
+                if (!$model->isUserInContest()) {
+                    Yii::$app->db->createCommand()->insert('{{%contest_user}}', [
+                        'contest_id' => $model->id,
+                        'user_id' => Yii::$app->user->id
+                    ])->execute();
+                }
             }
             if ($model->getRunStatus() == Contest::STATUS_NOT_START) {
                 Yii::$app->session->setFlash('error', 'The contest has not started.');
@@ -306,7 +415,7 @@ class ContestController extends Controller
             $solution->contest_id = $model->id;
             $solution->status = Solution::STATUS_HIDDEN;
             $solution->save();
-            Yii::$app->session->setFlash('success', 'Submit Successfully');
+            Yii::$app->session->setFlash('success', Yii::t('app', 'Submitted successfully'));
             return $this->refresh();
         }
         $submissions = [];
@@ -322,7 +431,7 @@ class ContestController extends Controller
                 ->limit(10)
                 ->all();
         }
-        if (Yii::$app->request->isAjax) {
+        if (Yii::$app->request->isPjax) {
             return $this->renderAjax('/contest/problem', [
                 'model' => $model,
                 'solution' => $solution,
@@ -350,15 +459,8 @@ class ContestController extends Controller
     protected function findModel($id)
     {
         if (($model = Contest::findOne($id)) !== null) {
-            $isVisible = ($model->status == Contest::STATUS_VISIBLE);
-            $isAuthor = !Yii::$app->user->isGuest && Yii::$app->user->id === $model->created_by;
-            if ($isVisible || $isAuthor) {
-                if ($model->scenario != Contest::SCENARIO_OFFLINE || $model->getRunStatus() == Contest::STATUS_ENDED ||
-                    $model->isUserInContest()) {
-                    return $model;
-                } else {
-                    throw new ForbiddenHttpException('You are not allowed to perform this action.');
-                }
+            if ($model->status != Contest::STATUS_HIDDEN || !Yii::$app->user->isGuest && Yii::$app->user->id === $model->created_by) {
+                return $model;
             } else {
                 throw new ForbiddenHttpException('You are not allowed to perform this action.');
             }

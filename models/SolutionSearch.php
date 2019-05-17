@@ -45,7 +45,7 @@ class SolutionSearch extends Solution
      */
     public function search($params, $contest_id = NULL)
     {
-        $query = Solution::find()->with('user');
+        $query = Solution::find()->with('user')->with('problem');
 
         if ($contest_id != NULL) {
             $query = $query->where(['contest_id' => $contest_id])->with([
@@ -54,15 +54,24 @@ class SolutionSearch extends Solution
                 }
             ]);
             if (Yii::$app->user->isGuest || Yii::$app->user->identity->role != User::ROLE_ADMIN) {
-                $time = Yii::$app->db->createCommand('SELECT lock_board_time, end_time FROM {{%contest}} WHERE id = :id', [
+                $contest = Yii::$app->db->createCommand('SELECT lock_board_time, end_time, type FROM {{%contest}} WHERE id = :id', [
                     ':id' => $contest_id
                 ])->queryOne();
-                $lockTime = strtotime($time['lock_board_time']);
-                $endTime = strtotime($time['end_time']);
-                if (!empty($lockTime) && $lockTime <= time() && time() <= $endTime + 120 * 60) {
+                $lockTime = strtotime($contest['lock_board_time']);
+                $endTime = strtotime($contest['end_time']);
+                $currentTime = time();
+                $type = $contest['type'];
+
+                // OI 模式比赛未结束时只查当前用户的提交记录
+                if ($type == Contest::TYPE_OI && $currentTime <= $endTime) {
+                    $query->andWhere('created_by=:uid', [
+                        ':uid' => Yii::$app->user->id
+                    ]);
+                // 设定了封榜时间则查询封榜时间前的提交记录
+                } else if (!empty($lockTime) && $lockTime <= time() && time() <= $endTime + Yii::$app->setting->get('scoreboardFrozenTime')) {
                     $query->andWhere('created_by=:uid OR created_at < :lock_board_time', [
                         ':uid' => Yii::$app->user->id,
-                        ':lock_board_time' => $time['lock_board_time']
+                        ':lock_board_time' => $contest['lock_board_time']
                     ]);
                 }
             }
@@ -85,12 +94,12 @@ class SolutionSearch extends Solution
             return $dataProvider;
         }
         $created_by = '';
-        if (isset($this->username)) {
+        if (!empty($this->username)) {
             $created_by = (new Query())->select('id')
                 ->from('{{%user}}')
                 ->andWhere('nickname=:name', [':name' => $this->username])
                 ->orWhere('username=:name', [':name' => $this->username])
-                ->column();
+                ->scalar();
         }
         // grid filtering conditions
         $query->andFilterWhere([

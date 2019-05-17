@@ -15,6 +15,7 @@ use app\models\Contest;
 
 AppAsset::register($this);
 
+$this->registerJsFile('https://cdnjs.cloudflare.com/ajax/libs/jquery.countdown/2.2.0/jquery.countdown.min.js', ['depends' => 'yii\web\JqueryAsset']);
 $model = $this->params['model'];
 $status = $model->getRunStatus();
 ?>
@@ -23,7 +24,8 @@ $status = $model->getRunStatus();
 <html lang="<?= Yii::$app->language ?>">
 <head>
     <meta charset="<?= Yii::$app->charset ?>">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="renderer" content="webkit">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <?= Html::csrfMetaTags() ?>
     <title><?= Html::encode($this->title) ?></title>
@@ -41,7 +43,7 @@ $status = $model->getRunStatus();
 <div class="wrap">
     <?php
     NavBar::begin([
-        'brandLabel' => Yii::$app->params['ojName'] . ' OJ',
+        'brandLabel' => Yii::$app->setting->get('ojName') . ' OJ',
         'brandUrl' => Yii::$app->homeUrl,
         'options' => [
             'class' => 'navbar-default',
@@ -49,8 +51,15 @@ $status = $model->getRunStatus();
     ]);
     $menuItems = [
         ['label' => Yii::t('app', 'Home'), 'url' => ['/site/index']],
-        ['label' => Yii::t('app', 'Contest'), 'url' => ['/contest/index']],
     ];
+    if ($model->group_id != 0) {
+        $menuItems[] = [
+            'label' => Yii::t('app', 'Group'),
+            'url' => Yii::$app->user->isGuest ? ['/group/index'] : ['/group/my-group']
+        ];
+    } else {
+        $menuItems[] = ['label' => Yii::t('app', 'Contest'), 'url' => ['/contest/index']];
+    }
     if (Yii::$app->user->isGuest) {
         $menuItems[] = ['label' => Yii::t('app', 'Signup'), 'url' => ['/site/signup']];
         $menuItems[] = ['label' => Yii::t('app', 'Login'), 'url' => ['/site/login']];
@@ -82,27 +91,27 @@ $status = $model->getRunStatus();
         <?= Alert::widget() ?>
         <div class="contest-info">
             <div class="row">
-                <div class="col-md-3 text-left">
-                    <strong>Start </strong>
+                <div class="col-md-3 text-left hidden-print">
+                    <strong><?= Yii::t('app', 'Start') ?> </strong>
                     <?= $model->start_time ?>
                 </div>
                 <div class="col-md-6 text-center">
                     <h2 class="contest-title">
                         <?= Html::encode($model->title) ?>
-                        <?php if ($model->type == Contest::TYPE_HOMEWORK): ?>
-                        <small>
-                            <?= Html::a('<span class="glyphicon glyphicon-cog"></span> ' . Yii::t('app', 'Setting'),
-                                ['/homework/update', 'id' => $model->id]) ?>
-                        </small>
+                        <?php if ($model->group_id != 0 && !Yii::$app->user->isGuest && $model->created_by == Yii::$app->user->id): ?>
+                            <small>
+                                <?= Html::a('<span class="glyphicon glyphicon-cog"></span> ' . Yii::t('app', 'Setting'),
+                                    ['/homework/update', 'id' => $model->id]) ?>
+                            </small>
                         <?php endif; ?>
                     </h2>
                 </div>
-                <div class="col-md-3 text-right">
-                    <strong>End </strong>
+                <div class="col-md-3 text-right hidden-print">
+                    <strong><?= Yii::t('app', 'End') ?> </strong>
                     <?= $model->end_time ?>
                 </div>
             </div>
-            <div class="progress">
+            <div class="progress hidden-print">
                 <div class="progress-bar progress-bar-success" id="contest-progress" role="progressbar" aria-valuenow="60" aria-valuemin="0" aria-valuemax="100" style="width: 1%;">
                     <?php if ($status == $model::STATUS_NOT_START): ?>
                         Not start
@@ -114,24 +123,23 @@ $status = $model->getRunStatus();
                     <?php endif; ?>
                 </div>
             </div>
-            <div class="text-center"><strong>Now</strong> <span color=#993399><span id="nowdate"> <?php echo date("Y-m-d H:i:s") ?></span></span></div>
+            <div class="text-center hidden-print">
+                <strong><?= Yii::t('app', 'Now') ?></strong>
+                <span id="nowdate"> <?= date("Y-m-d H:i:s") ?></span>
+            </div>
         </div>
         <hr>
         <?php if ($status == $model::STATUS_NOT_START): ?>
             <div class="contest-countdown text-center">
-                <?= \russ666\widgets\Countdown::widget([
-                    'datetime' => date('Y-m-d H:i:s O', strtotime($model->start_time)),
-                    'format' => '%D:%H:%M:%S',
-                    'events' => [
-                        'finish' => 'function(){location.reload()}',
-                    ],
-                ]); ?>
+                <div id="countdown"></div>
             </div>
             <?php if (!empty($model->description)): ?>
                 <div class="contest-desc">
                     <?= Yii::$app->formatter->asHtml($model->description) ?>
                 </div>
             <?php endif; ?>
+        <?php elseif (!$model->canView()): ?>
+            <?= $content ?>
         <?php else: ?>
             <div class="contest-view">
                 <?php
@@ -148,11 +156,15 @@ $status = $model->getRunStatus();
                     [
                         'label' => '<span class="glyphicon glyphicon-signal"></span> ' . Yii::t('app' , 'Status'),
                         'url' => ['contest/status', 'id' => $model->id],
-                        'linkOptions' => ['data-pjax' => 0]
+                        'linkOptions' => ['data-pjax' => 0],
+                        // OI 模式不可见
+                        //'visible' => $model->type != Contest::TYPE_OI || $model->getRunStatus() == Contest::STATUS_ENDED
                     ],
                     [
                         'label' => '<span class="glyphicon glyphicon-glass"></span> ' . Yii::t('app', 'Standing'),
                         'url' => ['contest/standing', 'id' => $model->id],
+                        // OI 模式不可见
+                        'visible' => $model->type != Contest::TYPE_OI || $model->getRunStatus() == Contest::STATUS_ENDED
                     ],
                     [
                         'label' => '<span class="glyphicon glyphicon-comment"></span> ' . Yii::t('app', 'Clarification'),
@@ -162,8 +174,7 @@ $status = $model->getRunStatus();
                 if ($model->scenario == $model::SCENARIO_OFFLINE && $model->getRunStatus() == $model::STATUS_RUNNING) {
                     $menuItems[] = [
                         'label' => '<span class="glyphicon glyphicon-print"></span> 打印服务',
-                        'url' => ['/print/index', 'id' => $model->id],
-                        'linkOptions' => ['target' => '_blank']
+                        'url' => ['/contest/print', 'id' => $model->id]
                     ];
                 }
                 if ($model->getRunStatus() == $model::STATUS_ENDED) {
@@ -174,7 +185,7 @@ $status = $model->getRunStatus();
                 }
                 echo Nav::widget([
                     'items' => $menuItems,
-                    'options' => ['class' => 'nav nav-tabs'],
+                    'options' => ['class' => 'nav nav-tabs hidden-print'],
                     'encodeLabels' => false
                 ]) ?>
                 <?php \yii\widgets\Pjax::begin() ?>
@@ -187,14 +198,18 @@ $status = $model->getRunStatus();
 
 <footer class="footer">
     <div class="container">
-        <p class="pull-left">&copy; <?= Yii::$app->params['ojName'] ?> OJ <?= date('Y') ?></p>
+        <p class="pull-left">&copy; <?= Yii::$app->setting->get('ojName') ?> OJ <?= date('Y') ?></p>
     </div>
 </footer>
 <?php $this->endBody() ?>
 <script>
-    var diff = new Date("<?= date("Y/m/d H:i:s")?>").getTime() - new Date().getTime();
+    var client_time = new Date();
+    var diff = new Date("<?= date("Y/m/d H:i:s")?>").getTime() - client_time.getTime();
     var start_time = new Date("<?= $model->start_time ?>");
     var end_time = new Date("<?= $model->end_time ?>");
+    $("#countdown").countdown(start_time.getTime() - diff, function(event) {
+        $(this).html(event.strftime('%D:%H:%M:%S'));
+    });
     function clock() {
         var h, m, s, n, y, mon, d;
         var x = new Date(new Date().getTime() + diff);
@@ -207,8 +222,8 @@ $status = $model->getRunStatus();
         s = x.getSeconds();
 
         n = y + "-" + mon + "-" + d + " " + (h >= 10 ? h : "0" + h) + ":" + (m >= 10 ? m : "0" + m) + ":" + (s >= 10 ? s : "0" + s);
-        var now_time = new Date(n);
         document.getElementById('nowdate').innerHTML = n;
+        var now_time = new Date(n);
         if (now_time < end_time) {
             var rate = (now_time - start_time) / (end_time - start_time) * 100;
             document.getElementById('contest-progress').style.width = rate + "%";
@@ -221,8 +236,8 @@ $status = $model->getRunStatus();
 
     $(document).ready(function () {
         // 连接服务端
-        var socket = io('http://' + document.domain + ':2120');
-        var uid = <?= Yii::$app->user->isGuest ? session_id() : Yii::$app->user->id ?>
+        var socket = io(document.location.protocol + '//' + document.domain + ':2120');
+        var uid = <?= Yii::$app->user->isGuest ? session_id() : Yii::$app->user->id ?>;
         // 连接后登录
         socket.on('connect', function(){
             socket.emit('login', uid);
@@ -230,31 +245,6 @@ $status = $model->getRunStatus();
         // 后端推送来消息时
         socket.on('msg', function(msg){
             alert(msg);
-        });
-
-
-        $(".katex.math.inline").each(function () {
-            var parent = $(this).parent()[0];
-            if (parent.localName !== "code") {
-                var texTxt = $(this).text();
-                var el = $(this).get(0);
-                try {
-                    katex.render(texTxt, el);
-                } catch (err) {
-                    $(this).html("<span class=\'err\'>" + err);
-                }
-            } else {
-                $(this).parent().text($(this).parent().text());
-            }
-        });
-        $(".katex.math.multi-line").each(function () {
-            var texTxt = $(this).text();
-            var el = $(this).get(0);
-            try {
-                katex.render(texTxt, el, {displayMode: true})
-            } catch (err) {
-                $(this).html("<span class=\'err\'>" + err)
-            }
         });
 
         $('.pre p').each(function(i, block) {  // use <pre><p>

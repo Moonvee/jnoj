@@ -4,6 +4,7 @@ namespace app\modules\polygon\controllers;
 
 use app\models\Solution;
 use app\modules\polygon\models\PolygonStatus;
+use app\modules\polygon\models\ProblemSearch;
 use Yii;
 use app\models\User;
 use app\modules\polygon\models\Problem;
@@ -38,8 +39,6 @@ class ProblemController extends Controller
                 'class' => AccessControl::className(),
                 'rules' => [
                     [
-                        'actions' => ['index', 'view', 'create', 'delete', 'update', 'solution', 'tests', 'spj',
-                                      'img_upload', 'run', 'deletefile', 'viewfile', 'verify', 'solution-detail'],
                         'allow' => true,
                         'roles' => ['@'],
                     ],
@@ -55,16 +54,12 @@ class ProblemController extends Controller
     public function actionIndex()
     {
         $this->layout = '/main';
-        $query = Problem::find()->with('user')->orderBy(['id' => SORT_DESC]);
-        if (Yii::$app->user->identity->role != User::ROLE_ADMIN) {
-            $query->andWhere(['created_by' => Yii::$app->user->id]);
-        }
-        $dataProvider = new ActiveDataProvider([
-            'query' => $query
-        ]);
+        $searchModel = new ProblemSearch();
+        $dataProvider = $searchModel->search(Yii::$app->request->queryParams);
 
         return $this->render('index', [
             'dataProvider' => $dataProvider,
+            'searchModel' => $searchModel
         ]);
     }
 
@@ -138,7 +133,7 @@ class ProblemController extends Controller
             $fp = fopen($dataPath . '/spj.cc',"w");
             fputs($fp, $model->spj_source);
             fclose($fp);
-            @exec("g++ {$dataPath}/spj.cc -o {$dataPath}/spj");
+            exec("g++ -fno-asm -std=c++11 -O2 {$dataPath}/spj.cc -o {$dataPath}/spj -I" . Yii::getAlias('@app/libraries'));
             return $this->redirect(['spj', 'id' => $model->id]);
         }
         return $this->render('spj', [
@@ -155,7 +150,9 @@ class ProblemController extends Controller
     public function actionSolution($id)
     {
         $model = $this->findModel($id);
-
+        if ($model->solution_lang == null) {
+            $model->solution_lang = Yii::$app->user->identity->language;
+        }
         if ($model->load(Yii::$app->request->post()) && $model->save()) {
             return $this->redirect(['solution', 'id' => $model->id]);
         }
@@ -207,6 +204,34 @@ class ProblemController extends Controller
             'model' => $model,
             'solutionStatus' => $solutionStatus
         ]);
+    }
+
+
+    /**
+     * 下载测试数据
+     */
+    public function actionDownloadData($id)
+    {
+        $model = $this->findModel($id);
+        $filename = Yii::$app->params['polygonProblemDataPath'] . $model->id;
+        $zipName = '/tmp/' . time() . $id . '.zip';
+        if (!file_exists($filename)) {
+            return false;
+        }
+        $zipArc = new \ZipArchive();
+        if (!$zipArc->open($zipName, \ZipArchive::CREATE)) {
+            return false;
+        }
+        $res = $zipArc->addGlob("{$filename}/*", GLOB_BRACE, ['remove_all_path' => true]);
+        $zipArc->close();
+        if (!$res) {
+            return false;
+        }
+        if (!file_exists($zipName)) {
+            return false;
+        }
+        Yii::$app->response->on(\yii\web\Response::EVENT_AFTER_SEND, function($event) { unlink($event->data); }, $zipName);
+        return Yii::$app->response->sendFile($zipName, $model->id . '-' . $model->title . '.zip');
     }
 
     public function actionDeletefile($id, $name)
@@ -268,6 +293,31 @@ class ProblemController extends Controller
 
         return $this->render('update', [
             'model' => $model,
+        ]);
+    }
+
+    public function actionSubtask($id)
+    {
+        $model = $this->findModel($id);
+
+        $dataPath = Yii::$app->params['polygonProblemDataPath'] . $model->id;
+        $subtaskContent = '';
+
+        if (file_exists($dataPath . '/config')) {
+            $subtaskContent = file_get_contents($dataPath . '/config');
+        }
+        if (Yii::$app->request->isPost) {
+            $spjContent = Yii::$app->request->post('subtaskContent');
+            if (!is_dir($dataPath)) {
+                mkdir($dataPath);
+            }
+            $fp = fopen($dataPath . '/config',"w");
+            fputs($fp, $spjContent);
+            fclose($fp);
+        }
+        return $this->render('subtask', [
+            'model' => $model,
+            'subtaskContent' => $subtaskContent
         ]);
     }
 

@@ -19,18 +19,12 @@ class ComposerStaticInit248c156de5c41d17b4bfccde9823c1ff
             'yii\\bootstrap\\' => 14,
             'yii\\' => 4,
         ),
-        'r' => 
-        array (
-            'russ666\\widgets\\' => 16,
-        ),
         'j' => 
         array (
             'justinvoelker\\tagging\\' => 22,
         ),
         'c' => 
         array (
-            'conquer\\helpers\\' => 16,
-            'conquer\\codemirror\\' => 19,
             'cebe\\markdown\\' => 14,
         ),
         'W' => 
@@ -64,21 +58,9 @@ class ComposerStaticInit248c156de5c41d17b4bfccde9823c1ff
         array (
             0 => __DIR__ . '/..' . '/yiisoft/yii2',
         ),
-        'russ666\\widgets\\' => 
-        array (
-            0 => __DIR__ . '/..' . '/russ666/yii2-countdown',
-        ),
         'justinvoelker\\tagging\\' => 
         array (
             0 => __DIR__ . '/..' . '/justinvoelker/yii2-tagging',
-        ),
-        'conquer\\helpers\\' => 
-        array (
-            0 => __DIR__ . '/..' . '/conquer/helpers',
-        ),
-        'conquer\\codemirror\\' => 
-        array (
-            0 => __DIR__ . '/..' . '/conquer/codemirror',
         ),
         'cebe\\markdown\\' => 
         array (

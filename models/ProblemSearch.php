@@ -2,10 +2,8 @@
 
 namespace app\models;
 
-use Yii;
 use yii\base\Model;
 use yii\data\ActiveDataProvider;
-use app\models\Problem;
 
 /**
  * ProblemSearch represents the model behind the search form of `app\models\Problem`.
@@ -41,7 +39,7 @@ class ProblemSearch extends Problem
      */
     public function search($params)
     {
-        $query = Problem::find()->where(['status' => Problem::STATUS_VISIBLE]);
+        $query = Problem::find()->orderBy(['id' => SORT_DESC])->with('user');
 
         // add conditions that should always apply here
 

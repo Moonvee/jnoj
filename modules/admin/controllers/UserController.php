@@ -2,11 +2,7 @@
 
 namespace app\modules\admin\controllers;
 
-use app\models\Solution;
-use app\modules\polygon\models\PolygonStatus;
-use app\modules\polygon\models\Problem;
 use Yii;
-use yii\data\ActiveDataProvider;
 use yii\web\Controller;
 use yii\web\NotFoundHttpException;
 use yii\filters\AccessControl;
@@ -60,6 +56,16 @@ class UserController extends Controller
         $searchModel = new UserSearch();
         $dataProvider = $searchModel->search(Yii::$app->request->queryParams);
 
+        if (Yii::$app->request->isPost) {
+            $keys = Yii::$app->request->post('keylist');
+            $action = Yii::$app->request->get('action');
+            foreach ($keys as $key) {
+                Yii::$app->db->createCommand()->update('{{%user}}', [
+                    'role' => $action
+                ], ['id' => $key])->execute();
+            }
+            return $this->refresh();
+        }
         return $this->render('index', [
             'searchModel' => $searchModel,
             'dataProvider' => $dataProvider,
@@ -105,13 +111,19 @@ class UserController extends Controller
     public function actionUpdate($id)
     {
         $model = $this->findModel($id);
-        $model->scenario = 'security';
 
-        if ($model->load(Yii::$app->request->post())) {
-            Yii::$app->db->createCommand()->update('{{%user}}', [
-                'password_hash' => Yii::$app->security->generatePasswordHash($model->newPassword)
-            ], ['id' => $model->id])->execute();
-            Yii::$app->session->setFlash('success', 'Saved Successfully');
+        if (Yii::$app->request->isPost) {
+            $newPassword = Yii::$app->request->post('User')['newPassword'];
+            $role = Yii::$app->request->post('User')['role'];
+            if (!empty($newPassword)) {
+                Yii::$app->db->createCommand()->update('{{%user}}', [
+                    'password_hash' => Yii::$app->security->generatePasswordHash($newPassword)
+                ], ['id' => $model->id])->execute();
+            } else if (!empty($role)) {
+                $model->role = intval($role);
+                $model->save();
+            }
+            Yii::$app->session->setFlash('success', Yii::t('app', 'Saved successfully'));
             return $this->refresh();
         }
 

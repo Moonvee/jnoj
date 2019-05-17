@@ -3,6 +3,7 @@
 namespace app\models;
 
 use Yii;
+use yii\caching\TagDependency;
 use yii\db\Expression;
 use yii\db\Query;
 
@@ -17,6 +18,7 @@ use yii\db\Query;
  * @property string $status
  * @property string $description
  * @property string $editorial
+ * @property int $group_id
  * @property int $type
  * @property int $scenario
  * @property int $created_by
@@ -47,12 +49,14 @@ class Contest extends \yii\db\ActiveRecord
     const TYPE_RANK_SINGLE = 1;
     const TYPE_RANK_GROUP  = 2;
     const TYPE_HOMEWORK    = 3;
+    const TYPE_OI          = 4;
 
     /**
      * 是否可见
      */
-    const STATUS_HIDDEN = 0;
-    const STATUS_VISIBLE = 1;
+    const STATUS_HIDDEN = 0; // 隐藏
+    const STATUS_VISIBLE = 1; // 公开
+    const STATUS_PRIVATE = 2; // 私有
 
     /**
      * 线上线下场景
@@ -74,9 +78,10 @@ class Contest extends \yii\db\ActiveRecord
     public function rules()
     {
         return [
+            [['title', 'start_time', 'end_time'], 'required'],
             [['start_time', 'end_time', 'lock_board_time'], 'safe'],
             [['description', 'editorial'], 'string'],
-            [['id', 'status', 'type', 'scenario', 'created_by'], 'integer'],
+            [['id', 'status', 'type', 'scenario', 'created_by', 'group_id'], 'integer'],
             [['title'], 'string', 'max' => 255],
         ];
     }
@@ -137,6 +142,9 @@ class Contest extends \yii\db\ActiveRecord
             case Contest::TYPE_HOMEWORK:
                 $res = Yii::t('app', 'Homework');
                 break;
+            case Contest::TYPE_OI:
+                $res = Yii::t('app', 'OI');
+                break;
             default:
                 $res = "null";
         }
@@ -146,6 +154,11 @@ class Contest extends \yii\db\ActiveRecord
     public function getUser()
     {
         return $this->hasOne(User::className(), ['id' => 'created_by']);
+    }
+
+    public function getGroup()
+    {
+        return $this->hasOne(Group::className(), ['id' => 'group_id']);
     }
 
     /**
@@ -200,13 +213,19 @@ class Contest extends \yii\db\ActiveRecord
      */
     public function getProblems()
     {
-        return Yii::$app->db->createCommand('
-            SELECT `p`.`title`, `p`.`id` AS `problem_id`, `c`.`num`
-            FROM `problem` `p`
-            LEFT JOIN `contest_problem` `c` ON `c`.`contest_id`=:cid
-            WHERE p.id=c.problem_id
-            ORDER BY `c`.`num`
-        ', [':cid' => $this->id])->queryAll();
+        $dependency = new \yii\caching\DbDependency([
+            'sql'=>'SELECT COUNT(*) FROM {{%contest_problem}} WHERE contest_id=:cid',
+            'params' => [':cid' => $this->id]
+        ]);
+        return Yii::$app->db->cache(function ($db) {
+            return $db->createCommand('
+                SELECT `p`.`title`, `p`.`id` AS `problem_id`, `c`.`num`
+                FROM `problem` `p`
+                LEFT JOIN `contest_problem` `c` ON `c`.`contest_id`=:cid
+                WHERE p.id=c.problem_id
+                ORDER BY `c`.`num`
+            ', [':cid' => $this->id])->queryAll();
+        }, 60, $dependency);
     }
 
     /**
@@ -216,8 +235,9 @@ class Contest extends \yii\db\ActiveRecord
     public function getUsersSolution()
     {
         return Yii::$app->db->createCommand('
-            SELECT `u`.`id` as `user_id`, `username`, `nickname`, `result`, `s`.`problem_id`, `s`.`created_at`, `s`.`id`
-            FROM `solution` `s` LEFT JOIN `user` `u` ON u.id=s.created_by
+            SELECT u.id as user_id, username, nickname, result, s.problem_id, s.created_at, s.id, s.score
+            FROM `solution` `s`
+            LEFT JOIN `user` `u` ON u.id=s.created_by
             WHERE `contest_id`=:id AND `s`.`created_at` <= :endtime ORDER BY `s`.`id`
         ', [':id' => $this->id, ':endtime' => $this->end_time])->queryAll();
     }
@@ -238,7 +258,7 @@ class Contest extends \yii\db\ActiveRecord
     public function getContestUser()
     {
         $dependency = new \yii\caching\DbDependency([
-            'sql'=>'SELECT COUNT(1) FROM {{%contest_user}} WHERE contest_id=:cid',
+            'sql'=>'SELECT COUNT(*) FROM {{%contest_user}} WHERE contest_id=:cid',
             'params' => [':cid' => $this->id]
         ]);
         return Yii::$app->db->cache(function ($db) {
@@ -255,7 +275,7 @@ class Contest extends \yii\db\ActiveRecord
     public function getContestUserCount()
     {
         return Yii::$app->db->createCommand('
-            SELECT COUNT(1) FROM {{%contest_user}} WHERE contest_id=:cid
+            SELECT COUNT(*) FROM {{%contest_user}} WHERE contest_id=:cid
         ', [':cid' => $this->id])->queryScalar();
     }
 
@@ -268,14 +288,19 @@ class Contest extends \yii\db\ActiveRecord
     {
         $users_solution_data = $this->getUsersSolution();
         $users = $this->getContestUser();
+        $problems = $this->getProblems();
         $result = [];
         $first_blood = [];
         $submit_count = [];
+        $problem_ids = [];
         $count = count($users_solution_data);
         $start_time = $this->start_time;
         $end_time = $this->end_time;
         $lock_time = 0x7fffffff;
 
+        foreach ($problems as $problem) {
+            $problem_ids[$problem['problem_id']] = 1;
+        }
         foreach ($users as $user) {
             $result[$user['user_id']]['username'] = $user['username'];
             $result[$user['user_id']]['role'] = $user['role'];
@@ -298,9 +323,9 @@ class Contest extends \yii\db\ActiveRecord
             $pid = $row['problem_id'];
             $created_at = $row['created_at'];
 
-            // 封榜，比赛结束 120 分钟后解榜
-            if ($lock && strtotime($lock_time) <= strtotime($created_at) && time() <= strtotime($end_time) + 120 * 60)
-                break;
+            if (!isset($problem_ids[$pid])) {
+                continue;
+            }
 
             // 初始化数据信息
             if (!isset($submit_count[$pid]['solved']))
@@ -311,9 +336,12 @@ class Contest extends \yii\db\ActiveRecord
             // AC 时间
             if (!isset($result[$user]['ac_time'][$pid]))
                 $result[$user]['ac_time'][$pid] = 0;
-            // 没 AC 的次数
+            // 没 AC 的次数（不含 CE 编译出错 次数）
             if (!isset($result[$user]['wa_count'][$pid]))
                 $result[$user]['wa_count'][$pid] = 0;
+            // CE（编译出错） 次数
+            if (!isset($result[$user]['ce_count'][$pid]))
+                $result[$user]['ce_count'][$pid] = 0;
             // 正在测评
             if (!isset($result[$user]['pending'][$pid]))
                 $result[$user]['pending'][$pid] = 0;
@@ -326,11 +354,19 @@ class Contest extends \yii\db\ActiveRecord
                 continue;
             }
 
-            $result[$user]['submit']++;
             $submit_count[$pid]['submit']++;
-            // Accept
+
+            // 封榜，比赛结束后的一定时间解榜，解榜时间 scoreboardFrozenTime 变量的设置详见后台设置页面
+            if ($lock && strtotime($lock_time) <= strtotime($created_at) &&
+                time() <= strtotime($end_time) + Yii::$app->setting->get('scoreboardFrozenTime')) {
+                ++$result[$user]['pending'][$pid];
+                continue;
+            }
+
             if ($row['result'] == Solution::OJ_AC) {
+                // AC
                 $submit_count[$pid]['solved']++;
+                $result[$user]['pending'][$pid] = 0;
 
                 if (empty($first_blood[$pid])) {
                     if ($this->type == self::TYPE_RANK_SINGLE) {
@@ -340,6 +376,7 @@ class Contest extends \yii\db\ActiveRecord
                 }
                 $sec = strtotime($created_at) - strtotime($start_time);
                 ++$result[$user]['solved'];
+                // 单人赛计分，详见 view/wiki/contest.php。
                 if ($this->type == self::TYPE_RANK_SINGLE) {
                     $score = 0.5 * self::BASIC_SCORE + max(0, self::BASIC_SCORE - 2 * $sec / 60 - $result[$user]['wa_count'][$pid] * 50);
                     $result[$user]['ac_time'][$pid] = $score;
@@ -348,13 +385,14 @@ class Contest extends \yii\db\ActiveRecord
                     $result[$user]['ac_time'][$pid] = $sec / 60;
                     $result[$user]['time'] += $sec + $result[$user]['wa_count'][$pid] * 60 * 20;
                 }
-                //Other cases
+            } else if ($row['result'] <= 3) {
+                // 还未测评
+                ++$result[$user]['pending'][$pid];
+            } else if ($row['result'] == Solution::OJ_CE) {
+                // 编译出错
+                ++$result[$user]['ce_count'][$pid];
             } else {
-                if ($row['result'] <= 3) {
-                    ++$result[$user]['pending'][$pid];
-                } else {
-                    $result[$user]['pending'][$pid] = 0;
-                }
+                // 其它情况
                 ++$result[$user]['wa_count'][$pid];
             }
         }
@@ -362,7 +400,7 @@ class Contest extends \yii\db\ActiveRecord
         usort($result, function($a, $b) {
             if ($a['solved'] != $b['solved']) { //优先解题数
                 return $a['solved'] < $b['solved'];
-            } else if ($a['time'] != $b['time']) { //按时间或分数
+            } else if ($a['time'] != $b['time']) { //按时间（分数）
                 if ($this->type == self::TYPE_RANK_SINGLE) {
                     return $a['time'] < $b['time'];
                 } else {
@@ -381,12 +419,128 @@ class Contest extends \yii\db\ActiveRecord
     }
 
     /**
+     * 获取 OI 比赛排名数据
+     */
+    public function getOIRankData($lock = true)
+    {
+        $users_solution_data = $this->getUsersSolution();
+        $users = $this->getContestUser();
+        $problems = $this->getProblems();
+        $result = [];
+        $first_blood = [];
+        $submit_count = [];
+        $count = count($users_solution_data);
+        $start_time = $this->start_time;
+        $end_time = $this->end_time;
+        $lock_time = 0x7fffffff;
+
+        foreach ($users as $user) {
+            $result[$user['user_id']]['username'] = $user['username'];
+            $result[$user['user_id']]['user_id'] = $user['user_id'];
+            $result[$user['user_id']]['nickname'] = $user['nickname'];
+            $result[$user['user_id']]['role'] = $user['role'];
+            $result[$user['user_id']]['rating'] = $user['rating'];
+            $result[$user['user_id']]['total_score'] = 0; // 测评总分
+            $result[$user['user_id']]['score'] = [];
+            $result[$user['user_id']]['max_score'] = [];
+            $result[$user['user_id']]['correction_score'] = 0; //订正总分
+            $result[$user['user_id']]['student_number'] = $user['student_number'];
+        }
+
+        foreach ($problems as $problem) {
+            $problem_ids[$problem['problem_id']] = 1;
+        }
+
+        if (!empty($this->lock_board_time)) {
+            $lock_time = $this->lock_board_time;
+        }
+
+        for ($i = 0; $i < $count; $i++) {
+            $row = $users_solution_data[$i];
+            $user = $row['user_id'];
+            $pid = $row['problem_id'];
+            $created_at = $row['created_at'];
+            $score = $row['score'];
+
+            if (!isset($problem_ids[$pid])) {
+                continue;
+            }
+
+            // 初始化数据信息
+            if (!isset($submit_count[$pid]['solved']))
+                $submit_count[$pid]['solved'] = 0;
+            if (!isset($submit_count[$pid]['submit']))
+                $submit_count[$pid]['submit'] = 0;
+
+            if (!isset($result[$user]['max_score'][$pid]))
+                $result[$user]['max_score'][$pid] = 0;
+
+            $result[$user]['score'][$pid] = $score;
+            $result[$user]['max_score'][$pid] = max($score, $result[$user]['max_score'][$pid]);
+
+            // 正在测评
+            if (!isset($result[$user]['pending'][$pid]))
+                $result[$user]['pending'][$pid] = 0;
+            // 最快解题
+            if (!isset($first_blood[$pid]))
+                $first_blood[$pid] = '';
+
+            // 封榜，比赛结束后的一定时间解榜，解榜时间 scoreboardFrozenTime 变量的设置详见后台设置页面
+            if ($lock && strtotime($lock_time) <= strtotime($created_at) &&
+                time() <= strtotime($end_time) + Yii::$app->setting->get('scoreboardFrozenTime')) {
+                ++$result[$user]['pending'][$pid];
+                continue;
+            }
+            $submit_count[$pid]['submit']++;
+            if ($row['result'] == Solution::OJ_AC) {
+                // AC
+                $submit_count[$pid]['solved']++;
+                $result[$user]['pending'][$pid] = 0;
+                $sec = strtotime($created_at) - strtotime($start_time);
+                // AC 时间
+                if (!isset($result[$user]['ac_time'][$pid]))
+                    $result[$user]['ac_time'][$pid] = $sec / 60;
+
+                if (empty($first_blood[$pid])) {
+                    $first_blood[$pid] = $user;
+                }
+            } else if ($row['result'] <= 3) {
+                // 还未测评
+                ++$result[$user]['pending'][$pid];
+            }
+        }
+
+        foreach ($result as &$v) {
+            foreach ($v['score'] as $s) {
+                $v['total_score'] += $s;
+            }
+            foreach ($v['max_score'] as $s) {
+                $v['correction_score'] += $s;
+            }
+        }
+
+        usort($result, function($a, $b) {
+            if ($a['total_score'] != $b['total_score']) { // 优先测评总分
+                return $a['total_score'] < $b['total_score'];
+            } else { //订正总分
+                return $a['correction_score'] < $b['correction_score'];
+            }
+        });
+
+        return [
+            'rank_result' => $result,
+            'submit_count' => $submit_count,
+            'first_blood' => $first_blood
+        ];
+    }
+
+    /**
      * 判断用户是否参加比赛
      * @return boolean
      */
     public function isUserInContest()
     {
-        return Yii::$app->db->createCommand('SELECT count(1) FROM {{%contest_user}} WHERE user_id=:uid AND contest_id=:cid', [
+        return Yii::$app->db->createCommand('SELECT count(*) FROM {{%contest_user}} WHERE user_id=:uid AND contest_id=:cid', [
             ':uid' => Yii::$app->user->id,
             ':cid' => $this->id
         ])->queryScalar();
@@ -399,14 +553,18 @@ class Contest extends \yii\db\ActiveRecord
      */
     public function getProblemById($id)
     {
-        return Yii::$app->db->createCommand(
-            "SELECT `cp`.`num`, `p`.`title`, `p`.`id`, `p`.`description`, 
-            `p`.`input`, `p`.`output`, `p`.`sample_input`, `p`.`sample_output`, `p`.`hint`, `p`.`time_limit`, 
-            `p`.`memory_limit` 
-            FROM `problem` `p` 
-            LEFT JOIN `contest_problem` `cp` ON cp.problem_id=p.id 
-            WHERE (`cp`.`num`={$id}) AND (`cp`.`contest_id`={$this->id})"
-        )->queryOne();
+        $contestID = $this->id;
+        $dependency = new TagDependency(['tags' => ['id' => $id, 'contestID' => $contestID]]);
+        return Yii::$app->db->cache(function ($db) use ($id, $contestID) {
+            return $db->createCommand(
+                "SELECT `cp`.`num`, `p`.`title`, `p`.`id`, `p`.`description`, 
+                `p`.`input`, `p`.`output`, `p`.`sample_input`, `p`.`sample_output`, `p`.`hint`, `p`.`time_limit`, 
+                `p`.`memory_limit` 
+                FROM `problem` `p` 
+                LEFT JOIN `contest_problem` `cp` ON cp.problem_id=p.id 
+                WHERE (`cp`.`num`={$id}) AND (`cp`.`contest_id`={$contestID})"
+            )->queryOne();
+        }, 60, $dependency);
     }
 
     public function getClarifies()
@@ -485,5 +643,67 @@ class Contest extends \yii\db\ActiveRecord
                 'rank' => $rankResult[$user['user_id']]['rank'] + 1
             ], ['user_id' => $user['user_id'], 'contest_id' => $this->id])->execute();
         }
+    }
+
+    /**
+     * 是否有权限访问。用于限制比赛信息、问题、提交队列、榜单、答疑内容的访问，仅供管理员、参赛用户或比赛结束才能访问
+     */
+    public function canView()
+    {
+        // 比赛结束
+        if ($this->status == Contest::STATUS_VISIBLE && $this->getRunStatus() == Contest::STATUS_ENDED) {
+            return true;
+        }
+        $isAdmin = !Yii::$app->user->isGuest && Yii::$app->user->identity->role == User::ROLE_ADMIN;
+        $isAuthor = !Yii::$app->user->isGuest && $this->created_by == Yii::$app->user->id;
+        // 管理员或者创建人
+        if ($isAdmin || $isAuthor) {
+            return true;
+        }
+        // 该比赛/作业不可见
+        if ($this->status == Contest::STATUS_HIDDEN) {
+            return false;
+        }
+        // 参赛用户
+        if ($this->isUserInContest()) {
+            return true;
+        }
+        // 小组成员
+        if ($this->group_id != 0) {
+            return Yii::$app->db->createCommand('SELECT count(*) FROM {{%group_user}} WHERE user_id=:uid AND group_id=:gid', [
+                ':uid' => Yii::$app->user->id,
+                ':gid' => $this->group_id
+            ])->queryScalar();
+        }
+        return false;
+    }
+
+    public function getLoginUserProblemSolvingStatus()
+    {
+        if (Yii::$app->user->isGuest) {
+            return null;
+        }
+        $statuses = Yii::$app->db->createCommand('
+            SELECT `s`.`result`, `s`.`problem_id`
+            FROM `solution` `s` LEFT JOIN `user` `u` ON u.id=s.created_by
+            WHERE `contest_id`=:id AND `s`.`created_at`<=:endtime AND `s`.`created_by`=:uid
+        ', [':id' => $this->id, ':endtime' => $this->end_time, ':uid' => Yii::$app->user->id])->queryAll();
+        $res = [];
+        foreach ($statuses as $status) {
+            if (isset($res[$status['problem_id']]) && $res[$status['problem_id']] == Solution::OJ_AC) {
+                continue;
+            }
+            $res[$status['problem_id']] = $status['result'];
+        }
+        return $res;
+    }
+
+    /**
+     * 是否处于封榜状态
+     */
+    public function isScoreboardFrozen()
+    {
+       return !empty($this->lock_board_time) && strtotime($this->lock_board_time) <= time() &&
+           time() <= strtotime($this->end_time) + Yii::$app->setting->get('scoreboardFrozenTime');
     }
 }

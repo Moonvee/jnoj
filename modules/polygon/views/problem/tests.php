@@ -20,6 +20,15 @@ $files = $model->getDataFiles();
     该页面用于生成、编辑程序的测试数据。
 </p>
 <hr>
+<?php if (extension_loaded('zip')): ?>
+    <p>
+        <?= Html::a('下载全部数据', ['download-data', 'id' => $model->id], ['class' => 'btn btn-success']); ?>
+    </p>
+<?php else: ?>
+    <p>
+        服务器未启用 php-zip 扩展，如需下载测试数据，请安装 php-zip　扩展。
+    </p>
+<?php endif; ?>
 <div class="table-responsive">
     <table class="table table-bordered table-rank">
         <thead>
@@ -85,6 +94,7 @@ $files = $model->getDataFiles();
                                    title="<?= Yii::t('app', 'View') ?>">
                                     <span class="glyphicon glyphicon-eye-open"></span>
                                 </a>
+                                &nbsp;
                                 <a href="<?= Url::toRoute(['/polygon/problem/deletefile', 'id' => $model->id,'name' => $file['name']]) ?>"
                                    title="<?= Yii::t('app', 'Delete') ?>">
                                     <span class="glyphicon glyphicon-remove"></span>
@@ -118,6 +128,7 @@ $files = $model->getDataFiles();
                                    title="<?= Yii::t('app', 'View') ?>">
                                     <span class="glyphicon glyphicon-eye-open"></span>
                                 </a>
+                                &nbsp;
                                 <a href="<?= Url::toRoute(['/polygon/problem/deletefile', 'id' => $model->id,'name' => $file['name']]) ?>"
                                    title="<?= Yii::t('app', 'Delete') ?>">
                                     <span class="glyphicon glyphicon-remove"></span>

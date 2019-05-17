@@ -36,7 +36,7 @@ $this->title = Yii::t('app', 'Status');
             [
                 'attribute' => 'problem_id',
                 'value' => function ($model, $key, $index, $column) {
-                    return Html::a($model->problem_id, ['/problem/view', 'id' => $model->problem_id]);
+                    return Html::a($model->problem_id . ' - ' . $model->problem->title, ['/problem/view', 'id' => $model->problem_id]);
                 },
                 'format' => 'raw'
             ],
@@ -44,9 +44,7 @@ $this->title = Yii::t('app', 'Status');
                 'attribute' => 'result',
                 'value' => function ($model, $key, $index, $column) {
                     if (($model->result == $model::OJ_CE || $model->result == $model::OJ_WA
-                        || $model->result == $model::OJ_RE) &&
-                        (Yii::$app->params['isShareCode'] || (!Yii::$app->user->isGuest &&
-                                ($model->created_by == Yii::$app->user->id || Yii::$app->user->identity->role == \app\models\User::ROLE_ADMIN)))) {
+                        || $model->result == $model::OJ_RE) && $model->canViewErrorInfo()) {
                         return Html::a($model->getResult(),
                             ['/solution/result', 'id' => $model->id],
                             ['onclick' => 'return false', 'data-click' => "solution_info"]
@@ -56,6 +54,10 @@ $this->title = Yii::t('app', 'Status');
                     }
                 },
                 'format' => 'raw'
+            ],
+            [
+                'attribute' => 'score',
+                'visible' => Yii::$app->setting->get('oiMode')
             ],
             [
                 'attribute' => 'time',
@@ -74,8 +76,7 @@ $this->title = Yii::t('app', 'Status');
             [
                 'attribute' => 'language',
                 'value' => function ($model, $key, $index, $column) {
-                    if (Yii::$app->params['isShareCode'] || (!Yii::$app->user->isGuest &&
-                            ($model->created_by == Yii::$app->user->id || Yii::$app->user->identity->role == \app\models\User::ROLE_ADMIN))) {
+                    if ($model->canViewSource()) {
                         return Html::a($model->getLang(),
                             ['/solution/source', 'id' => $model->id],
                             ['onclick' => 'return false', 'data-click' => "solution_info"]
@@ -97,22 +98,58 @@ $this->title = Yii::t('app', 'Status');
         ],
     ]); ?>
 
-    <?php
-    $js = "
-    $('[data-click=solution_info]').click(function() {
-        $.ajax({
-            url: $(this).attr('href'),
-            type:'post',
-            error: function(){alert('error');},
-            success:function(html){
-                $('#solution-content').html(html);
-                $('#solution-info').modal('show');
-            }
-        });
+<?php
+$url = \yii\helpers\Url::toRoute(['/solution/verdict']);
+$loadingImgUrl = Yii::getAlias('@web/images/loading.gif');
+$js = <<<EOF
+$('[data-click=solution_info]').click(function() {
+    $.ajax({
+        url: $(this).attr('href'),
+        type:'post',
+        error: function(){alert('error');},
+        success:function(html){
+            $('#solution-content').html(html);
+            $('#solution-info').modal('show');
+        }
     });
-    ";
-    $this->registerJs($js);
-    ?>
+});
+function updateVerdictByKey(submission) {
+    $.get({
+        url: "{$url}?id=" + submission.attr('data-submissionid'),
+        success: function(data) {
+            var obj = JSON.parse(data);
+            submission.attr("waiting", obj.waiting);
+            submission.text(obj.result);
+            if (obj.result === "Accepted") {
+                submission.attr("class", "text-success")
+            }
+            if (obj.waiting === "true") {
+                submission.append('<img src="{$loadingImgUrl}" alt="loading">');
+            }
+        }
+    });
+}
+var waitingCount = $("strong[waiting=true]").length;
+if (waitingCount > 0) {
+    console.log("There is waitingCount=" + waitingCount + ", starting submissionsEventCatcher...");
+    var interval = null;
+    var testWaitingsDone = function () {
+        var waitingCount = $("strong[waiting=true]").length;
+        console.log("There is waitingCount=" + waitingCount + ", starting submissionsEventCatcher...");
+        $("strong[waiting=true]").each(function(){
+            updateVerdictByKey($(this));
+        });
+        if (interval && waitingCount === 0) {
+            console.log("Stopping submissionsEventCatcher.");
+            clearInterval(interval);
+            interval = null;
+        }
+    }
+    interval = setInterval(testWaitingsDone, 1000);
+}
+EOF;
+$this->registerJs($js);
+?>
 
     <?php Pjax::end() ?>
 </div>

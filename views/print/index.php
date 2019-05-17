@@ -22,23 +22,33 @@ $this->params['breadcrumbs'][] = $this->title;
     <?= GridView::widget([
         'dataProvider' => $dataProvider,
         'columns' => [
-            'id',
             [
-                'attribute' => 'username',
+                'attribute' => 'id',
                 'value' => function ($model, $key, $index, $column) {
-                    return Html::a($model->user->username, ['/user/view', 'id' => $model->user->id]);
+                    return Html::a($model->id, ['/print/view', 'id' => $model->id], ['target' => '_blank']);
                 },
                 'format' => 'raw'
             ],
             [
-                'attribute' => 'nickname',
+                'attribute' => 'who',
                 'value' => function ($model, $key, $index, $column) {
-                    return Html::a($model->user->nickname, ['/user/view', 'id' => $model->user->id]);
+                    return Html::a(Html::encode($model->user->username) . ' [' . Html::encode($model->user->nickname) . ']', ['/user/view', 'id' => $model->user->id]);
+                },
+                'format' => 'raw'
+            ],
+            [
+                'attribute' => 'status',
+                'value' => function ($model, $key, $index, $column) {
+                    if ($model->status == \app\models\ContestPrint::STATUS_HAVE_READ) {
+                        $text = '<p class="text-success"><strong>' . Yii::t('app', 'Already processed') . '</strong></p>';
+                    } else {
+                        $text = '<p class="text-danger"><strong>' . Yii::t('app', 'Not processed yet') . '</strong></p>';
+                    }
+                    return Html::a($text, ['/print/view', 'id' => $model->id]);
                 },
                 'format' => 'raw'
             ],
             'created_at:datetime',
-            'status',
             [
                 'class' => 'yii\grid\ActionColumn'
             ],

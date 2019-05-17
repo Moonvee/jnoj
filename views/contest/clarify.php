@@ -20,7 +20,7 @@ if ($discuss != null) {
     ]);
 }
 ?>
-<div style="padding-top: 20px">
+<div style="margin-top: 20px">
     <?php
     if ($dataProvider->count > 0) {
         echo GridView::widget([
@@ -31,13 +31,13 @@ if ($discuss != null) {
                 [
                     'attribute' => Yii::t('app', 'Announcement'),
                     'value' => function ($model, $key, $index, $column) {
-                        return $model->content;
+                        return Yii::$app->formatter->asHtml($model->content);
                     },
-                    'format' => 'ntext',
+                    'format' => 'html'
                 ],
                 [
                     'attribute' => 'created_at',
-                    'headerOptions' => ['width' => '34%'],
+                    'options' => ['width' => '150px'],
                     'format' => 'datetime'
                 ]
             ],
@@ -90,7 +90,7 @@ if ($discuss != null) {
         </div>
         <?php ActiveForm::end(); ?>
         <?php else: ?>
-        <p>比赛已经结束</p>
+        <p><?= Yii::t('app', 'The contest has ended.') ?></p>
         <?php endif; ?>
     </div>
 </div>

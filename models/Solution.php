@@ -3,7 +3,6 @@
 namespace app\models;
 
 use Yii;
-use yii\db\Query;
 
 /**
  * This is the model class for table "{{%solution}}".
@@ -22,13 +21,24 @@ use yii\db\Query;
  * @property int $code_length
  * @property string $judgetime
  * @property string $pass_info
+ * @property int $score
  * @property string $judge
  */
 class Solution extends ActiveRecord
 {
     const STATUS_HIDDEN = 0;
     const STATUS_VISIBLE = 1;
+    const STATUS_TEST = 2;
 
+    /**
+     * 是这个值或小于这个值表示处于等待测评状态
+     */
+    const OJ_WAITING_STATUS = 3;
+
+    /**
+     * OJ 测评状态
+     * @see Solution::getResultList()
+     */
     const OJ_WT0 = 0;
     const OJ_WT1 = 1;
     const OJ_CI  = 2;
@@ -41,7 +51,8 @@ class Solution extends ActiveRecord
     const OJ_OL  = 9;
     const OJ_RE  = 10;
     const OJ_CE  = 11;
-    const OJ_CO  = 12;
+    const OJ_SE  = 12;
+    const OJ_NT  = 13;
 
     const CLANG = 0;
     const CPPLANG = 1;
@@ -72,7 +83,8 @@ class Solution extends ActiveRecord
     public function rules()
     {
         return [
-            [['problem_id', 'created_by', 'time', 'memory', 'result', 'language', 'contest_id', 'status', 'code_length'], 'integer'],
+            [['problem_id', 'created_by', 'time', 'memory', 'result', 'language', 'contest_id', 'status',
+              'code_length', 'score'], 'integer'],
             [['created_at', 'judgetime'], 'safe'],
             [['language', 'source'], 'required'],
             [['language'], 'in', 'range' => [0, 1, 2, 3], 'message' => 'Please select a language'],
@@ -93,7 +105,7 @@ class Solution extends ActiveRecord
             'time' => Yii::t('app', 'Time'),
             'memory' => Yii::t('app', 'Memory'),
             'created_at' => Yii::t('app', 'Submit Time'),
-            'source' => Yii::t('app', 'Source'),
+            'source' => Yii::t('app', 'Code'),
             'result' => Yii::t('app', 'Result'),
             'language' => Yii::t('app', 'Language'),
             'contest_id' => Yii::t('app', 'Contest ID'),
@@ -102,6 +114,8 @@ class Solution extends ActiveRecord
             'judgetime' => Yii::t('app', 'Judgetime'),
             'pass_info' => Yii::t('app', 'Pass Info'),
             'judge' => Yii::t('app', 'Judge'),
+            'score' => Yii::t('app', 'Score'),
+            'who' => Yii::t('app', 'Who')
         ];
     }
 
@@ -175,11 +189,18 @@ class Solution extends ActiveRecord
     public function getResult()
     {
         $res = self::getResultList($this->result);
-        if ($this->result == Solution::OJ_AC) {
-            return '<p class="text-success"><strong>' . $res . '</strong></p>';
+        $loadingImgUrl = Yii::getAlias('@web/images/loading.gif');
+
+        if ($this->result <= Solution::OJ_WAITING_STATUS) {
+            $waitingHtmlDom = 'waiting="true"';
+            $loadingImg = "<img src=\"{$loadingImgUrl}\">";
         } else {
-            return '<p class="text-danger"><strong>' . $res . '</strong></p>';
+            $waitingHtmlDom = 'waiting="false"';
+            $loadingImg = "";
         }
+        $innerHtml =  'data-verdict="' . $this->result . '" data-submissionid="' . $this->id . '" ' . $waitingHtmlDom;
+        $cssClass = $this->result == Solution::OJ_AC ? 'text-success' : 'text-danger';
+        return "<strong class=\"$cssClass\" $innerHtml>{$res}{$loadingImg}</strong>";
     }
 
     public static function getResultList($res = '')
@@ -198,7 +219,8 @@ class Solution extends ActiveRecord
             Solution::OJ_OL => Yii::t('app', 'Output Limit Exceeded'),
             Solution::OJ_RE => Yii::t('app', 'Runtime Error'),
             Solution::OJ_CE => Yii::t('app', 'Compile Error'),
-            //Solution::OJ_CO => Yii::t('app', 'Compile Succeed')
+            Solution::OJ_SE => Yii::t('app', 'System Error'),
+            Solution::OJ_NT => Yii::t('app', 'No Test Data')
         ];
         return $res === '' ? $results : $results[$res];
     }
@@ -243,5 +265,85 @@ class Solution extends ActiveRecord
     public function getProblemInContest()
     {
         return $this->contestProblem;
+    }
+
+    /**
+     * OI 比赛模式，用户是否有权限查看过题情况
+     */
+    public function canViewResult()
+    {
+        // 状态可见且设置了分享状态可以查看。以下代码中 isShareCode 的说明参见后台设置页面。
+        // 对于比赛中的提交， status 的值默认为 STATUS_HIDDEN，比赛结束时可以在后台设为 STATUS_VISIBLE 以供普通用户查看
+        // 对于后台验题时的提交，status 的值为 STATUS_HIDDEN
+        if ($this->status == Solution::STATUS_VISIBLE && Yii::$app->setting->get('isShareCode')) {
+            return true;
+        }
+        // 管理员有权限查看
+        if (!Yii::$app->user->isGuest && Yii::$app->user->identity->role == User::ROLE_ADMIN) {
+            return true;
+        }
+
+        // contest_id 为空，说明不是比赛模式
+        if (empty($this->contest_id)) {
+            return true;
+        }
+
+        $contest = Yii::$app->db->createCommand('SELECT end_time, type FROM {{%contest}} WHERE id = :id', [
+            ':id' => $this->contest_id
+        ])->queryOne();
+
+        // OI 模式比赛结束时才可以看
+        if ($contest['type'] != Contest::TYPE_OI || time() >= strtotime($contest['end_time'])) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 用户是否有权限查看代码
+     */
+    public function canViewSource()
+    {
+        // 提交代码的作者有权限查看
+        if ($this->created_by == Yii::$app->user->id) {
+            return true;
+        }
+        // 状态可见且设置了分享状态可以查看。以下代码中 isShareCode 的说明参见后台设置页面。
+        // 对于比赛中的提交， status 的值默认为 STATUS_HIDDEN，比赛结束时可以在后台设为 STATUS_VISIBLE 以供普通用户查看
+        // 对于后台验题时的提交，status 的值为 STATUS_HIDDEN
+        if ($this->status == Solution::STATUS_VISIBLE && Yii::$app->setting->get('isShareCode')) {
+            return true;
+        }
+        // 管理员有权限查看
+        if (!Yii::$app->user->isGuest && Yii::$app->user->identity->role == User::ROLE_ADMIN) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 用户是否有权限可以查看错误信息
+     */
+    public function canViewErrorInfo()
+    {
+        // 状态可见且设置了分享状态可以查看。以下代码中 isShareCode 的说明参见后台设置页面。
+        // 对于比赛中的提交， status 的值默认为 STATUS_HIDDEN，比赛结束时可以在后台设为 STATUS_VISIBLE 以供普通用户查看
+        // 对于后台验题时的提交，status 的值为 STATUS_HIDDEN
+        if ($this->status == Solution::STATUS_VISIBLE && Yii::$app->setting->get('isShareCode')) {
+            return true;
+        }
+        // 管理员有权限查看所有情况
+        if (!Yii::$app->user->isGuest && Yii::$app->user->identity->role == User::ROLE_ADMIN) {
+            return true;
+        }
+        // 对于比赛中的提交，普通用户只能查看 Compile Error 所记录的信息
+        if ($this->status == Solution::STATUS_HIDDEN && $this->created_by == Yii::$app->user->id && $this->result == self::OJ_CE) {
+            return true;
+        }
+        //　非比赛中的提交，普通用户也能查看出错信息
+        if ($this->status == Solution::STATUS_VISIBLE && $this->created_by == Yii::$app->user->id) {
+            return true;
+        }
+        return false;
     }
 }
